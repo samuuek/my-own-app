@@ -60,6 +60,20 @@ test("creates media content and finds it through global search", async ({ page }
   await page.getByRole("button", { name: /搜索所有内容/ }).click();
   await page.getByPlaceholder("输入关键词").fill("可搜索");
   await expect(page.getByRole("button", { name: "可搜索的内容灵感", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  const card = page.locator(".media-card").filter({ hasText: "可搜索的内容灵感" });
+  await card.locator(".icon-button").click();
+  await card.locator(".row-menu").getByRole("button", { name: "编辑详情", exact: true }).click();
+  const editor = page.getByRole("dialog");
+  await editor.getByLabel(/制作阶段/).selectOption("published");
+  await editor.getByLabel(/实际发布日期/).fill("2026-08-02");
+  await editor.getByLabel(/播放或阅读/).fill("1387");
+  await editor.getByLabel(/^点赞/).fill("94");
+  await editor.getByLabel(/^评论/).fill("17");
+  await editor.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByRole("img", { name: "发布后视频数据图表" })).toBeVisible();
+  await expect(page.getByText("1,387", { exact: true })).toBeVisible();
+  await expect(page.getByText("8.0%", { exact: true })).toBeVisible();
 });
 
 test("keeps linked plan titles live and opens the source module", async ({ page, request }) => {

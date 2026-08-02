@@ -22,7 +22,7 @@ export default defineConfig({
     env: {
       NODE_ENV: "test",
       MUZI_DATA_DIR: path.resolve(".test-data/e2e"),
-      MUZI_PORT: "4317",
+      MUZI_PORT: "4327",
     },
   },
 });

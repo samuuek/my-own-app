@@ -1,11 +1,13 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
+import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Plus, CalendarBlank, LinkSimple, ChartLine, DotsThree, Trash, CalendarPlus, PencilSimple } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useWorkspace } from "../WorkspaceContext";
+import { buildMediaAnalytics } from "../features/mediaAnalytics";
 import { formatDate, localDate, classNames } from "../utils";
-import { Badge, Button, EmptyState, EntityForm, Modal, PageHeader, type FieldDefinition } from "../components/ui";
+import { Badge, Button, EmptyState, EntityForm, Modal, PageHeader, Section, type FieldDefinition } from "../components/ui";
 
 const stages = [
   { value: "idea", label: "灵感" },
@@ -35,6 +37,7 @@ export function MediaPage() {
   const [params, setParams] = useSearchParams();
   const [editing, setEditing] = useState<Record<string, any> | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
+  const analytics = useMemo(() => buildMediaAnalytics(data.mediaContents), [data.mediaContents]);
   useEffect(() => { if (params.get("new") === "1") setEditing({ stage: "idea" }); }, [params]);
   const close = () => { setEditing(null); setParams({}); };
   const move = async (id: string, stage: string) => {
@@ -47,6 +50,30 @@ export function MediaPage() {
     <div>
       <PageHeader eyebrow="创作流程" title="自媒体" description="从灵感、制作到发布，把内容放在真正的创作流程里。" actions={<Button onClick={() => setEditing({ stage: "idea" })}><Plus size={18} />记录内容</Button>} />
       <div className="media-kpis"><div><span>正在制作</span><strong>{data.mediaContents.filter((item) => item.stage === "producing").length}</strong></div><div><span>等待发布</span><strong>{data.mediaContents.filter((item) => item.stage === "ready").length}</strong></div><div><span>本月已发布</span><strong>{data.mediaContents.filter((item) => item.stage === "published" && item.published_at?.slice(0, 7) === localDate().slice(0, 7)).length}</strong></div></div>
+      <Section title="发布后数据" description="对比最近 12 条已发布内容的播放、点赞和评论" action={<Badge tone="accent">{analytics.points.length} 条有数据</Badge>}>
+        {analytics.points.length ? <div className="media-analytics-grid">
+          <div className="media-analytics-summary">
+            <div><span>总播放 / 阅读</span><strong>{formatMetric(analytics.totals.views)}</strong><small>当前已记录内容合计</small></div>
+            <div><span>平均互动率</span><strong>{analytics.engagementRate.toFixed(1)}%</strong><small>（点赞 + 评论）÷ 播放</small></div>
+            <div><span>最佳表现</span><strong>{analytics.best?.title}</strong><small>{formatMetric(analytics.best?.views ?? 0)} 次播放 / 阅读</small></div>
+          </div>
+          <div className="media-analytics-chart" role="img" aria-label="发布后视频数据图表">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={analytics.points} margin={{ top: 8, right: 10, bottom: 4, left: 0 }}>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 5" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: "var(--text-soft)", fontSize: 9 }} tickLine={false} axisLine={false} />
+                <YAxis yAxisId="views" tickFormatter={formatCompactAxis} tick={{ fill: "var(--text-soft)", fontSize: 9 }} tickLine={false} axisLine={false} width={42} />
+                <YAxis yAxisId="engagement" orientation="right" tickFormatter={formatCompactAxis} tick={{ fill: "var(--text-soft)", fontSize: 9 }} tickLine={false} axisLine={false} width={42} />
+                <Tooltip content={<MediaTooltip />} />
+                <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
+                <Bar yAxisId="views" dataKey="views" name="播放 / 阅读" fill="var(--accent)" radius={[5, 5, 1, 1]} maxBarSize={44} />
+                <Line yAxisId="engagement" type="monotone" dataKey="likes" name="点赞" stroke="var(--success)" strokeWidth={2.2} dot={{ r: 3, fill: "var(--surface-strong)" }} />
+                <Line yAxisId="engagement" type="monotone" dataKey="comments" name="评论" stroke="var(--text-soft)" strokeWidth={2} dot={{ r: 3, fill: "var(--surface-strong)" }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div> : <EmptyState title="还没有可视化数据" description="把内容标记为已发布，并填写播放、点赞或评论后，这里会自动生成图表。" />}
+      </Section>
       <DndContext onDragEnd={handleDragEnd}>
         <div className="kanban-board">{stages.map((stage) => <StageColumn key={stage.value} stage={stage} items={data.mediaContents.filter((item) => item.stage === stage.value)} onEdit={setEditing} onMove={move} onDelete={(id: string) => run(() => api.remove("mediaContents", id))} onPlan={(item: Record<string, any>) => run(() => api.create("planItems", { title: `推进内容：${item.title}`, plan_date: localDate(), source_module: "media", source_entity_type: "media_content", source_entity_id: item.id, priority: "medium" }))} menu={menu} setMenu={setMenu} />)}</div>
       </DndContext>
@@ -56,6 +83,20 @@ export function MediaPage() {
       </Modal>
     </div>
   );
+}
+
+function MediaTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
+  return <div className="media-chart-tooltip"><strong>{point.title}</strong>{point.publishedAt ? <small>{formatDate(point.publishedAt)}</small> : null}<span>播放 / 阅读 {formatMetric(point.views)}</span><span>点赞 {formatMetric(point.likes)}</span><span>评论 {formatMetric(point.comments)}</span></div>;
+}
+
+function formatMetric(value: number): string {
+  return new Intl.NumberFormat("zh-CN").format(value);
+}
+
+function formatCompactAxis(value: number): string {
+  return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
 function StageColumn({ stage, items, onEdit, onMove, onDelete, onPlan, menu, setMenu }: any) {

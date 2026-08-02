@@ -197,6 +197,18 @@ kbd { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var
 .media-kpis div { display: flex; align-items: baseline; gap: 9px; }
 .media-kpis span { color: var(--text-soft); font-size: 10px; }
 .media-kpis strong { font: 650 20px ui-monospace, monospace; }
+.media-analytics-grid { display: grid; grid-template-columns: minmax(190px, .28fr) minmax(0, 1fr); gap: 28px; align-items: stretch; }
+.media-analytics-summary { display: grid; align-content: start; }
+.media-analytics-summary > div { display: grid; gap: 5px; padding: 12px 0 15px; border-bottom: 1px solid var(--border); }
+.media-analytics-summary > div:first-child { padding-top: 2px; }
+.media-analytics-summary span, .media-analytics-summary small { color: var(--text-soft); font-size: 9px; }
+.media-analytics-summary strong { font: 650 22px/1.15 ui-monospace, monospace; letter-spacing: -.03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-analytics-summary > div:last-child strong { font-family: inherit; font-size: 13px; letter-spacing: -.015em; }
+.media-analytics-chart { height: 280px; min-width: 0; border-left: 1px solid var(--border); padding-left: 18px; }
+.media-chart-tooltip { min-width: 155px; display: grid; gap: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-strong); box-shadow: var(--shadow); padding: 10px 12px; }
+.media-chart-tooltip strong { font-size: 10px; }
+.media-chart-tooltip small { color: var(--text-soft); font-size: 8px; margin-bottom: 3px; }
+.media-chart-tooltip span { color: var(--text-soft); font: 9px ui-monospace, monospace; }
 .kanban-board { display: grid; grid-template-columns: repeat(5, minmax(190px, 1fr)); gap: 10px; align-items: start; padding-top: 24px; overflow-x: auto; }
 .kanban-column { min-height: 430px; border-radius: 13px; background: color-mix(in srgb, var(--surface-muted) 64%, transparent); padding: 10px; transition: background .18s; }
 .kanban-column.is-over { background: var(--accent-soft); }
@@ -447,5 +459,8 @@ kbd { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var
   .dashboard-grid { grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; }
   .summary-grid { grid-template-columns: repeat(2, 1fr); }
   .kanban-board { grid-template-columns: repeat(5, 210px); }
+  .media-analytics-grid { grid-template-columns: 1fr; }
+  .media-analytics-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .media-analytics-chart { border-left: 0; padding-left: 0; }
   .game-grid { grid-template-columns: 1fr; }
 }
