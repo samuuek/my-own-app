@@ -38,7 +38,7 @@ test("creates, schedules, displays and completes a daily plan item", async ({ pa
   await page.getByLabel(/开始时间/).fill("10:30");
   await page.getByLabel(/预计分钟/).fill("45");
   await page.getByLabel(/优先级/).selectOption("high");
-  await page.getByRole("button", { name: "保存" }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("浏览器验收任务")).toBeVisible();
   await page.getByRole("link", { name: "首页总览" }).click();
   const row = page.locator(".plan-row").filter({ hasText: "浏览器验收任务" });
@@ -55,7 +55,7 @@ test("creates media content and finds it through global search", async ({ page }
   await page.getByLabel(/^平台/).fill("B站");
   await page.getByLabel(/内容形式/).fill("视频");
   await page.getByLabel(/制作阶段/).selectOption("producing");
-  await page.getByRole("button", { name: "保存" }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("可搜索的内容灵感")).toBeVisible();
   await page.getByRole("button", { name: /搜索所有内容/ }).click();
   await page.getByPlaceholder("输入关键词").fill("可搜索");
@@ -70,7 +70,7 @@ test("creates media content and finds it through global search", async ({ page }
   await editor.getByLabel(/播放或阅读/).fill("1387");
   await editor.getByLabel(/^点赞/).fill("94");
   await editor.getByLabel(/^评论/).fill("17");
-  await editor.getByRole("button", { name: "保存" }).click();
+  await editor.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("img", { name: "发布后视频数据图表" })).toBeVisible();
   await expect(page.getByText("1,387", { exact: true })).toBeVisible();
   await expect(page.getByText("8.0%", { exact: true })).toBeVisible();
@@ -119,7 +119,7 @@ test("adds a development work item from the work-item section", async ({ page, r
   await dialog.getByLabel(/类型/).selectOption("bug");
   await dialog.getByLabel(/优先级/).selectOption("high");
   await dialog.getByLabel(/说明/).fill("验证工作项入口始终可见");
-  await dialog.getByRole("button", { name: "保存" }).click();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(section.getByText("从区块入口新增的 Bug")).toBeVisible();
 });
 

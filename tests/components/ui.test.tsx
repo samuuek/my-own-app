@@ -8,11 +8,11 @@ describe("shared interaction components", () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async () => undefined);
     render(<EntityForm fields={[{ name: "title", label: "标题", required: true }, { name: "minutes", label: "分钟", type: "number" }]} onSubmit={onSubmit} onCancel={() => undefined} />);
-    await user.click(screen.getByRole("button", { name: "保存" }));
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
     expect(await screen.findByText("请填写此项")).toBeInTheDocument();
     await user.type(screen.getByLabelText(/标题/), "专注开发");
     await user.type(screen.getByLabelText(/分钟/), "45");
-    await user.click(screen.getByRole("button", { name: "保存" }));
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
     expect(onSubmit).toHaveBeenCalledWith({ title: "专注开发", minutes: 45 });
   });
 
