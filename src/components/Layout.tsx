@@ -76,6 +76,38 @@ export function AppLayout() {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
+  // 环境层视差：滚动时让背景以极低速率位移，玻璃背后才有东西可折射。
+  // 只写一个 CSS 变量并由合成层处理，不触发 React 重渲染。
+  useEffect(() => {
+    const root = document.documentElement;
+    // 视差是纯增强。任何一个依赖的浏览器 API 缺席都必须静默降级，
+    // 绝不能让整个应用外壳挂掉。
+    if (typeof window.requestAnimationFrame !== "function") return;
+    const motion = typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)")
+      : null;
+    let frame = 0;
+    const apply = () => {
+      frame = 0;
+      // 夹在 ±110px：环境层只向外扩了 14%，位移超过这个量长页面底部会露边。
+      root.style.setProperty("--ambient-shift", String(Math.max(-110, Math.min(0, Math.round(window.scrollY * -0.04)))));
+    };
+    const onScroll = () => { if (!frame) frame = window.requestAnimationFrame(apply); };
+    const sync = () => {
+      window.removeEventListener("scroll", onScroll);
+      if (motion?.matches) { root.style.setProperty("--ambient-shift", "0"); return; }
+      window.addEventListener("scroll", onScroll, { passive: true });
+      apply();
+    };
+    sync();
+    motion?.addEventListener("change", sync);
+    return () => {
+      motion?.removeEventListener("change", sync);
+      window.removeEventListener("scroll", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
   return (
     <div className={classNames("app-shell", collapsed && "sidebar-collapsed")} data-module={currentPage.module}>
       <a className="skip-link" href="#main-content">跳到主要内容</a>
@@ -88,7 +120,7 @@ export function AppLayout() {
               <span className="nav-label">{group.label}</span>
               {group.links.map(({ to, label, icon: Icon }) => (
                 <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => classNames("nav-link", isActive && "active")} title={label}>
-                  <Icon size={19} weight="regular" /><span>{label}</span>
+                  <Icon size={17} weight="regular" /><span>{label}</span>
                 </NavLink>
               ))}
             </div>

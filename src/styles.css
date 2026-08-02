@@ -29,7 +29,11 @@
 }
 
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "PingFang SC", sans-serif;
+  /* macOS 系统字体栈。数字一律用 SF Pro + 表格数字对齐，
+     不用等宽字体——等宽会让界面读起来像终端而不是原生 App。 */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "PingFang SC", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-family: var(--font-ui);
   font-size: 13px;
   color-scheme: light;
   font-synthesis: none;
@@ -81,8 +85,17 @@
   --glass-clear-filter: blur(22px) saturate(168%) brightness(1.06);
   --glass-regular-filter: blur(32px) saturate(176%) brightness(1.04);
   --frosted-filter: blur(20px) saturate(148%) brightness(1.02);
-  --glass-sheen: inset 0 1px 0 var(--glass-edge), inset 1px 0 0 var(--glass-edge-low), inset 0 -1px 0 rgba(52, 78, 90, .05);
-  --frosted-sheen: inset 0 1px 0 rgba(255, 255, 255, .68);
+  /* 玻璃厚度：真实玻璃在边缘会聚光并把背景折向内侧。CSS 做不出位移，
+     但可以用「顶部镜面高光 + 左右次高光 + 边缘内侧光晕 + 底部折射暗带」
+     四层内阴影还原厚度感——这是 2D 里最接近透镜的读法。 */
+  --glass-sheen:
+    inset 0 1px 0 var(--glass-edge),
+    inset 1px 0 0 var(--glass-edge-low),
+    inset -1px 0 0 rgba(255, 255, 255, .22),
+    inset 0 7px 16px -12px rgba(255, 255, 255, .92),
+    inset 0 -1px 0 rgba(46, 70, 82, .07),
+    inset 0 -10px 20px -14px rgba(46, 70, 82, .20);
+  --frosted-sheen: inset 0 1px 0 rgba(255, 255, 255, .68), inset 0 -8px 18px -16px rgba(46, 70, 82, .14);
 
   /* 阴影：宽、淡、带环境色 */
   --shadow-glass: 0 24px 60px -18px rgba(36, 62, 76, .30), 0 4px 14px -4px rgba(36, 62, 76, .12);
@@ -112,6 +125,14 @@
   --motion-tint: 520ms;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-soft: cubic-bezier(.32, .72, 0, 1);
+  /* macOS 的面板与弹窗走的是弹簧而不是缓动曲线：快速起步、轻微过冲、
+     然后稳住。linear() 可以逐点描述这条弹簧，过冲控制在 3% 以内，
+     只够让人感到「有质量」，不至于像果冻。 */
+  --spring: linear(
+    0, 0.012 1.5%, 0.049 3.1%, 0.196 6.6%, 0.44 11.2%, 0.62 14.8%,
+    0.757 18.4%, 0.855 22%, 0.921 25.7%, 0.963 29.5%, 0.988 33.6%,
+    1.002 38.2%, 1.008 43.5%, 1.009 50%, 1.006 58%, 1.002 68%, 1
+  );
 
   /* 层级 */
   --z-ambient: 0;
@@ -165,8 +186,14 @@
   --glass-clear-bg: color-mix(in srgb, var(--accent) 8%, rgba(30, 40, 47, .52));
   --glass-regular-bg: color-mix(in srgb, var(--accent) 8%, rgba(24, 33, 39, .62));
   --frosted-bg: color-mix(in srgb, var(--accent) 7%, rgba(26, 35, 41, .70));
-  --glass-sheen: inset 0 1px 0 var(--glass-edge), inset 1px 0 0 var(--glass-edge-low), inset 0 -1px 0 rgba(0, 0, 0, .22);
-  --frosted-sheen: inset 0 1px 0 rgba(255, 255, 255, .09);
+  --glass-sheen:
+    inset 0 1px 0 var(--glass-edge),
+    inset 1px 0 0 var(--glass-edge-low),
+    inset -1px 0 0 rgba(255, 255, 255, .05),
+    inset 0 7px 16px -12px rgba(255, 255, 255, .26),
+    inset 0 -1px 0 rgba(0, 0, 0, .26),
+    inset 0 -10px 20px -14px rgba(0, 0, 0, .34);
+  --frosted-sheen: inset 0 1px 0 rgba(255, 255, 255, .09), inset 0 -8px 18px -16px rgba(0, 0, 0, .26);
 
   --shadow-glass: 0 26px 66px -18px rgba(0, 0, 0, .62), 0 4px 14px -4px rgba(0, 0, 0, .42);
   --shadow-panel: 0 18px 44px -20px rgba(0, 0, 0, .56), 0 2px 8px -2px rgba(0, 0, 0, .34);
@@ -204,6 +231,21 @@
 /* --- 3. 基础 ------------------------------------------------------------- */
 
 * { box-sizing: border-box; }
+
+/* macOS 的圆角是连续曲率（squircle），不是圆弧。半径越大差别越明显：
+   圆弧在直边与弧线的交界处会有一处曲率突变，看上去像被「掐」了一下。 */
+@supports (corner-shape: superellipse(4)) {
+  .sidebar, .topbar, .modal, .frosted-content, .section, .overview-strip, .summary-tile,
+  .detail-hero, .dashboard-aside, .project-rail, .client-column, .row-menu, .game-card,
+  .month-calendar, .kanban-column, .media-card, .media-chart-tooltip, .plan-toolbar,
+  .diet-toolbar, .entertainment-toolbar, .consult-action-strip, .dashboard-command-strip,
+  .nutrition-strip, .media-kpis, .project-tabs, .now-playing > div, .button, .icon-button,
+  .quick-grid button, .data-file-panel, .exercise-block, .calendar-selected-detail,
+  .search-trigger, .segmented, .compact-filter, .theme-toggle, .template-tabs,
+  .form-field input:not([type="checkbox"]), .form-field select, .form-field textarea {
+    corner-shape: superellipse(4);
+  }
+}
 html { min-height: 100%; background: var(--bg); }
 body {
   margin: 0;
@@ -226,23 +268,22 @@ a { color: inherit; text-decoration: none; }
 ::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: rgba(90, 112, 124, .32); background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(90, 112, 124, .5); background-clip: content-box; }
 
-/* 数字纵向对齐 */
-.overview-strip strong, .plan-stat strong, .date-block strong, .media-kpis strong,
-.media-analytics-summary strong, .consult-stats strong, .nutrition-metric strong,
-.sets-table strong, .calendar-day-number, .plan-time, .log-list time, .file-copy code {
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
-}
 
 /* --- 4. 环境背景 ---------------------------------------------------------
    柔和的光线分布，不是装饰图案：三处错开的径向亮区 + 暖冷渐变 + 暗角 + 噪点。 */
 
+/* 环境层随滚动做极轻微视差。这不是装饰动画——没有它，玻璃背后永远是
+   一张不动的渐变，backdrop-filter 就等于什么都没做（实测像素差 ≤ 2/255）。
+   有了它，顶栏和承载层的模糊才真的在折射变化中的环境。
+   只动 transform，独立合成层；prefers-reduced-motion 下自动停用。 */
 .app-shell::before {
   content: "";
   position: fixed;
-  inset: 0;
+  inset: -14% 0;
   z-index: var(--z-ambient);
   pointer-events: none;
+  transform: translate3d(0, calc(var(--ambient-shift, 0) * 1px), 0);
+  will-change: transform;
   background:
     /* 左上：柔和高光 */
     radial-gradient(54% 46% at 14% 2%, rgba(255, 255, 255, .58), transparent 72%),
@@ -311,13 +352,15 @@ a { color: inherit; text-decoration: none; }
   backdrop-filter: var(--glass-regular-filter);
 }
 
-/* frosted-content：任务列表、表单、日历、数据区 —— 稳定、可读 */
+/* frosted-content：任务列表、表单、日历、数据区 —— 稳定、可读。
+   刻意不加 backdrop-filter：它背后只有平滑的环境层，模糊一张平滑渐变
+   在像素上等于没做（实测最大差 2/255），却要为 100%+ 视口面积持续重绘。
+   这也符合 macOS 自身的模型——vibrancy 属于侧栏、工具栏和浮层，
+   内容区从来不是玻璃。层级差异改由透明度、描边、高光和投影表达。 */
 .frosted-content {
   background: var(--frosted-bg);
   border: 1px solid var(--border);
   box-shadow: var(--frosted-sheen), var(--shadow-panel);
-  -webkit-backdrop-filter: var(--frosted-filter);
-  backdrop-filter: var(--frosted-filter);
 }
 
 /* 承载层内部的数据表面：亮、平、只有发丝描边，不再叠一张浮空卡片 */
@@ -347,7 +390,7 @@ a { color: inherit; text-decoration: none; }
   grid-template-columns: 252px minmax(0, 1fr);
   isolation: isolate;
   position: relative;
-  transition: grid-template-columns var(--motion-panel) var(--ease-out);
+  transition: grid-template-columns var(--motion-panel) var(--spring);
 }
 .app-shell.sidebar-collapsed { grid-template-columns: 78px minmax(0, 1fr); }
 .sidebar, .app-main { position: relative; z-index: var(--z-content); }
@@ -371,11 +414,11 @@ a { color: inherit; text-decoration: none; }
 /* 侧边栏 */
 .sidebar {
   position: sticky;
-  top: 12px;
-  height: calc(100dvh - 24px);
-  margin: 12px 6px 12px 12px;
+  top: 0;
+  height: calc(100dvh - 12px);
+  margin: 0 6px 12px 12px;
   padding: 16px 12px 14px;
-  border-radius: var(--radius-glass);
+  border-radius: 0 0 var(--radius-glass) var(--radius-glass);
   color: var(--text);
   display: flex;
   flex-direction: column;
@@ -461,14 +504,16 @@ a { color: inherit; text-decoration: none; }
 .sidebar-collapsed .nav-link { width: 40px; justify-content: center; padding: 0; }
 
 /* 顶部工具栏 */
+/* 工具栏贴着窗口顶端。之前浮在 12px 之下，内容会滚进那道缝隙里
+   露出未被玻璃覆盖的半截控件——那是明显的破绽。 */
 .topbar {
   position: sticky;
-  top: 12px;
+  top: 0;
   z-index: var(--z-toolbar);
-  height: 56px;
-  margin: 12px var(--rail-right) 0 var(--rail-left);
-  padding: 0 8px 0 10px;
-  border-radius: var(--radius-panel);
+  height: 68px;
+  margin: 0 var(--rail-right) 0 var(--rail-left);
+  padding: 12px 8px 0 10px;
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -504,7 +549,7 @@ kbd {
   background: color-mix(in srgb, var(--surface-raised) 76%, transparent);
   color: var(--text-faint);
   padding: 2px 5px;
-  font: 10px/1 ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font: 10px/1 var(--font-mono);
   box-shadow: inset 0 -1px 0 var(--border);
 }
 .manual-save { border-color: color-mix(in srgb, var(--accent) 26%, var(--border)) !important; color: var(--accent-deep); }
@@ -534,7 +579,7 @@ kbd {
   max-width: 1560px;
   padding: 20px var(--rail-right) 64px var(--rail-left);
 }
-.page-container > div { animation: page-in var(--motion-panel) var(--ease-out) both; }
+.page-container > div { animation: page-in var(--motion-panel) var(--spring) both; }
 @keyframes page-in { from { opacity: 0; transform: translateY(6px); } }
 
 /* --- 7. 排版 ------------------------------------------------------------- */
@@ -761,7 +806,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .plan-stat:first-of-type { margin-left: auto; }
 .plan-stat + .plan-stat { margin-left: 4px; padding-left: 16px; border-left: 1px solid var(--border); }
 .plan-stat span { color: var(--text-faint); font-size: 10px; }
-.plan-stat strong { font: 620 13px/1.2 ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.plan-stat strong { font: 620 13px/1.2 var(--font-ui); }
 
 /* --- 10. 首页 ------------------------------------------------------------ */
 
@@ -776,12 +821,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   border-radius: var(--radius-panel);
   background: var(--frosted-bg);
   box-shadow: var(--frosted-sheen), var(--shadow-panel);
-  -webkit-backdrop-filter: var(--frosted-filter);
-  backdrop-filter: var(--frosted-filter);
 }
 .overview-strip > div:not(.progress-track) { flex: 0 0 auto; display: flex; align-items: baseline; gap: 9px; white-space: nowrap; }
 .overview-strip span { color: var(--text-soft); font-size: 11px; }
-.overview-strip strong { font: 660 22px/1.1 ui-monospace, "SFMono-Regular", Menlo, monospace; letter-spacing: -.03em; }
+.overview-strip strong { font: 660 22px/1.1 var(--font-ui); letter-spacing: -.03em; }
 .overview-strip small { color: var(--text-faint); font-size: 11px; font-weight: 500; }
 .overview-strip .progress-track { flex: 1 1 auto; min-width: 120px; }
 .progress-track, .mini-progress { height: 6px; border-radius: 999px; background: var(--surface-inset); overflow: hidden; box-shadow: inset 0 1px 2px rgba(40, 62, 74, .1); }
@@ -904,7 +947,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .complete-control:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
 .complete-control:active:not(:disabled) { transform: scale(.9); }
 .complete-control:disabled { background: var(--accent); border-color: var(--accent); cursor: default; }
-.plan-time { display: flex; align-items: center; gap: 5px; color: var(--text-soft); font: 11px ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.plan-time { display: flex; align-items: center; gap: 5px; color: var(--text-soft); font: 11px var(--font-ui); }
 .plan-copy { display: grid; gap: 3px; min-width: 0; }
 .plan-copy strong { font-size: 12.5px; font-weight: 580; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plan-copy small { color: var(--text-soft); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -940,8 +983,6 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   border-radius: var(--radius-panel);
   background: var(--frosted-bg);
   box-shadow: var(--frosted-sheen), var(--shadow-panel);
-  -webkit-backdrop-filter: var(--frosted-filter);
-  backdrop-filter: var(--frosted-filter);
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
@@ -974,7 +1015,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .plan-table-row:last-child { border-bottom: 0; }
 .plan-table-row:hover { background: var(--surface-muted); }
 .date-block { display: grid; gap: 2px; }
-.date-block strong { font: 600 12px ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.date-block strong { font: 600 12px var(--font-ui); }
 .date-block small { color: var(--text-faint); font-size: 10px; }
 .review-input { min-height: 100px; border-color: var(--border); background: var(--surface-raised); padding: 12px 14px; }
 .review-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -996,7 +1037,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   display: grid;
   gap: 1px;
   transform-origin: top right;
-  animation: menu-in var(--motion-control) var(--ease-out);
+  animation: menu-in 190ms var(--spring);
 }
 @keyframes menu-in { from { opacity: 0; transform: scale(.96) translateY(-4px); } }
 .row-menu button, .row-menu select {
@@ -1026,7 +1067,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .media-kpis div { flex: 0 0 auto; display: flex; align-items: baseline; gap: 8px; padding: 0 18px; }
 .media-kpis div + div { border-left: 1px solid var(--border); }
 .media-kpis span { color: var(--text-soft); font-size: 11px; }
-.media-kpis strong { font: 660 20px/1.1 ui-monospace, "SFMono-Regular", Menlo, monospace; letter-spacing: -.03em; }
+.media-kpis strong { font: 660 20px/1.1 var(--font-ui); letter-spacing: -.03em; }
 
 .media-analytics-grid { display: grid; grid-template-columns: minmax(186px, .26fr) minmax(0, 1fr); gap: 24px; align-items: stretch; }
 .media-analytics-summary { display: grid; align-content: start; }
@@ -1034,7 +1075,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .media-analytics-summary > div:first-child { padding-top: 0; }
 .media-analytics-summary > div:last-child { border-bottom: 0; }
 .media-analytics-summary span, .media-analytics-summary small { color: var(--text-soft); font-size: 10.5px; }
-.media-analytics-summary strong { font: 660 22px/1.15 ui-monospace, "SFMono-Regular", Menlo, monospace; letter-spacing: -.035em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-analytics-summary strong { font: 660 22px/1.15 var(--font-ui); letter-spacing: -.035em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-analytics-summary > div:last-child strong { font-family: inherit; font-size: 13px; font-weight: 600; letter-spacing: -.015em; }
 .media-analytics-chart { height: 290px; min-width: 0; border-left: 1px solid var(--border); padding-left: 20px; }
 .media-chart-tooltip {
@@ -1055,7 +1096,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .recharts-cartesian-axis-tick-value { fill: var(--text-soft); }
 .media-chart-tooltip strong { font-size: 11.5px; }
 .media-chart-tooltip small { color: var(--text-faint); font-size: 10px; margin-bottom: 2px; }
-.media-chart-tooltip span { color: var(--text-soft); font: 10.5px ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.media-chart-tooltip span { color: var(--text-soft); font: 10.5px var(--font-ui); }
 
 .kanban-board { display: grid; grid-template-columns: repeat(5, minmax(184px, 1fr)); gap: 10px; align-items: start; padding: 14px 0 12px; overflow-x: auto; }
 .kanban-column {
@@ -1146,8 +1187,6 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   border-radius: var(--radius-panel);
   background: var(--frosted-bg);
   box-shadow: var(--frosted-sheen), var(--shadow-panel);
-  -webkit-backdrop-filter: var(--frosted-filter);
-  backdrop-filter: var(--frosted-filter);
 }
 .detail-hero h2 { margin: 6px 0 8px; font-size: 20px; font-weight: 650; letter-spacing: -.028em; }
 .detail-hero p { color: var(--text-soft); max-width: 66ch; margin: 0; font-size: 11.5px; line-height: 1.6; }
@@ -1189,7 +1228,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .work-copy small { color: var(--text-soft); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-list article { display: grid; grid-template-columns: 92px 1fr; gap: 20px; border-bottom: 1px solid var(--border); padding: 13px 0; }
 .log-list article:last-child { border-bottom: 0; }
-.log-list time { color: var(--text-faint); font: 10.5px ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.log-list time { color: var(--text-faint); font: 10.5px var(--font-ui); }
 .log-list p { margin: 0; font-size: 11.5px; line-height: 1.65; }
 
 /* --- 10e. 咨询工作 -------------------------------------------------------- */
@@ -1230,7 +1269,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .consult-stats { display: flex; gap: 8px; }
 .consult-stats > div { min-width: 104px; border-left: 1px solid var(--border); padding-left: 15px; display: grid; gap: 3px; }
 .consult-stats svg { color: var(--accent); }
-.consult-stats strong { font: 640 14px ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.consult-stats strong { font: 640 14px var(--font-ui); }
 .consult-stats small { color: var(--text-soft); font-size: 10.5px; }
 .consult-action-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; padding: 7px 8px; }
 .consult-grid, .fitness-grid, .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
@@ -1258,7 +1297,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .exercise-block small { color: var(--text-soft); font-size: 10.5px; }
 .sets-table { display: grid; grid-template-columns: 44px 92px 92px 48px; gap: 7px 10px; align-items: center; }
 .sets-table > span { color: var(--text-faint); font-size: 10px; }
-.sets-table strong { font: 600 11px ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.sets-table strong { font: 600 11px var(--font-ui); }
 .sets-table input { width: 84px; }
 .set-check {
   width: 28px;
@@ -1330,7 +1369,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .month-calendar-day:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .month-calendar-day.outside { background: rgba(110, 132, 146, .07); color: var(--text-faint); }
 .month-calendar-day.selected { background: color-mix(in srgb, var(--accent) 15%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 46%, transparent); }
-.calendar-day-number { width: 22px; height: 22px; display: grid; place-items: center; align-self: flex-end; border-radius: var(--radius-chip); font: 600 10.5px ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.calendar-day-number { width: 22px; height: 22px; display: grid; place-items: center; align-self: flex-end; border-radius: var(--radius-chip); font: 600 10.5px var(--font-ui); }
 .month-calendar-day.today .calendar-day-number { background: var(--accent); color: var(--on-accent); box-shadow: 0 2px 6px -2px color-mix(in srgb, var(--accent) 80%, transparent); }
 .calendar-day-content { display: grid; gap: 4px; min-width: 0; }
 .calendar-entry {
@@ -1373,7 +1412,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .nutrition-metric { border: 0; border-radius: var(--radius-inset); padding: 13px 14px; }
 .nutrition-metric > div:first-child { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
 .nutrition-metric span { color: var(--text-soft); font-size: 10.5px; }
-.nutrition-metric strong { font: 640 16px/1.1 ui-monospace, "SFMono-Regular", Menlo, monospace; letter-spacing: -.03em; }
+.nutrition-metric strong { font: 640 16px/1.1 var(--font-ui); letter-spacing: -.03em; }
 .nutrition-metric small { color: var(--text-soft); font-size: 10px; }
 .meal-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .meal-columns .section { margin-top: 0; }
@@ -1461,7 +1500,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 }
 .file-copy { display: grid; gap: 4px; min-width: 0; }
 .file-copy strong { font-size: 12.5px; font-weight: 620; }
-.file-copy code { color: var(--text-soft); font: 10.5px ui-monospace, "SFMono-Regular", Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-copy code { color: var(--text-soft); font: 10.5px var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .file-copy > div { display: flex; flex-wrap: wrap; gap: 6px 13px; align-items: center; }
 .file-copy span { color: var(--text-faint); font-size: 10.5px; }
 .backup-list article { min-height: 60px; display: grid; grid-template-columns: 78px minmax(0, 1fr) 84px auto; gap: 10px; align-items: center; border-bottom: 1px solid var(--border); }
@@ -1516,7 +1555,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   overflow-y: auto;
   border-radius: var(--radius-modal);
   background: color-mix(in srgb, var(--accent) 4%, rgba(255, 255, 255, .82));
-  animation: modal-in var(--motion-modal) var(--ease-out);
+  animation: modal-in var(--motion-modal) var(--spring);
 }
 :root[data-theme="dark"] .modal { background: color-mix(in srgb, var(--accent) 6%, rgba(26, 35, 41, .88)); }
 .modal-wide { width: min(780px, 100%); }
@@ -1618,6 +1657,19 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .route-error { padding: 64px 32px; }
+
+/* --- 12b. 表格数字 --------------------------------------------------------
+   必须排在所有 `font:` 简写之后：简写会把 font-variant-numeric 重置为 normal，
+   同特异性下由书写顺序决定胜负。放在前面会被静默吃掉。                      */
+
+.overview-strip strong, .overview-strip small, .plan-stat strong, .date-block strong,
+.media-kpis strong, .media-analytics-summary strong, .consult-stats strong,
+.nutrition-metric strong, .nutrition-metric span, .sets-table strong, .calendar-day-number,
+.plan-time, .log-list time, .file-copy code, .interaction-timeline time,
+.month-calendar-toolbar strong, .backup-list small, .session-list span {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
 
 /* --- 13. 无障碍与降级 ----------------------------------------------------- */
 

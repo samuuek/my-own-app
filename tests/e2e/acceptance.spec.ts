@@ -53,15 +53,37 @@ test("keeps the Liquid Glass shell readable at both target desktop sizes", async
     });
     expect(topbarMaterial).toContain("blur");
 
-    // 内容承载层必须是半透明的磨砂表面：既不是全透明，也不是不透明实色。
-    const frosted = await page.locator(".dashboard-primary .section").first().evaluate((element) => {
-      const style = getComputedStyle(element);
-      const parts = style.backgroundColor.match(/[\d.]+/g) ?? [];
-      return { alpha: parts.length >= 4 ? Number(parts[parts.length - 1]) : 1, backdrop: style.backdropFilter };
+    // 材质层级：vibrancy 属于控件层（工具栏、浮层），内容层只是半透明表面。
+    // 内容层背后只有平滑的环境层，对它做模糊在像素上等于没做（实测最大差 2/255），
+    // 却要为超过一个视口的面积持续重绘——所以这里断言它「不该」有模糊。
+    await page.locator(".dashboard-primary .section").first().waitFor();
+    const surfaces = await page.evaluate(() => {
+      const read = (selector: string) => {
+        const element = document.querySelector(selector);
+        if (!element) return null;
+        const style = getComputedStyle(element);
+        const parts = style.backgroundColor.match(/[\d.]+/g) ?? [];
+        return { alpha: parts.length >= 4 ? Number(parts[parts.length - 1]) : 1, backdrop: style.backdropFilter };
+      };
+      return { content: read(".dashboard-primary .section"), chrome: read(".topbar") };
     });
-    expect(frosted.alpha).toBeGreaterThan(0.4);
-    expect(frosted.alpha).toBeLessThan(1);
-    expect(frosted.backdrop).toContain("blur");
+    expect(surfaces.content).not.toBeNull();
+    expect(surfaces.content!.alpha).toBeGreaterThan(0.4);
+    expect(surfaces.content!.alpha).toBeLessThan(1);
+    expect(surfaces.content!.backdrop).toBe("none");
+    expect(surfaces.chrome!.backdrop).toContain("blur");
+
+    // 环境层必须真的会动，否则控件层的模糊没有可折射的对象。
+    const parallax = await page.evaluate(async () => {
+      const read = () => getComputedStyle(document.documentElement).getPropertyValue("--ambient-shift").trim();
+      const atTop = read();
+      window.scrollTo(0, 600);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const scrolled = read();
+      window.scrollTo(0, 0);
+      return { atTop, scrolled };
+    });
+    expect(parallax.scrolled).not.toBe(parallax.atTop);
   }
 });
 
