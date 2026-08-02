@@ -114,6 +114,21 @@ test("adds a development work item from the work-item section", async ({ page, r
   await expect(section.getByText("从区块入口新增的 Bug")).toBeVisible();
 });
 
+test("deletes a consulting client through a confirmed trash action", async ({ page, request }) => {
+  const client = await create(request, "clients", { name: "待删除咨询客户", notes: "删除入口验收" });
+  await create(request, "consultingProjects", { client_id: client.id, name: "需要保留的咨询项目", status: "active" });
+  await create(request, "clients", { name: "继续保留的客户" });
+  await page.goto("/consulting");
+  await page.locator(".client-column").getByRole("button", { name: /待删除咨询客户/ }).click();
+  await page.getByRole("button", { name: "删除客户" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("相关项目、沟通和交付记录会保留");
+  await dialog.getByRole("button", { name: "移到回收站" }).click();
+  await expect(page.locator(".client-column").getByText("待删除咨询客户")).toHaveCount(0);
+  await page.getByRole("link", { name: "数据与设置" }).click();
+  await expect(page.locator(".trash-list article").filter({ hasText: "待删除咨询客户" })).toBeVisible();
+});
+
 test("renders distinct records in every specialized module", async ({ page, request }) => {
   const devProject = await create(request, "devProjects", { name: "验收开发项目", status: "active" });
   const milestone = await create(request, "devMilestones", { project_id: devProject.id, name: "验收里程碑", target_date: "2026-08-20", status: "open" });

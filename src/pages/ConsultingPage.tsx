@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, Users, ChatCenteredText, Package, PhoneCall, Timer, CalendarPlus, Check, CurrencyCircleDollar } from "@phosphor-icons/react";
+import { Plus, Users, ChatCenteredText, Package, PhoneCall, Timer, CalendarPlus, Check, CurrencyCircleDollar, Trash } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useWorkspace } from "../WorkspaceContext";
 import { formatDate, formatDateTime, formatDuration, localDate } from "../utils";
-import { Button, EmptyState, EntityForm, Modal, PageHeader, Section, type FieldDefinition } from "../components/ui";
+import { Button, ConfirmDialog, EmptyState, EntityForm, Modal, PageHeader, Section, type FieldDefinition } from "../components/ui";
 
 export function ConsultingPage() {
   const { data, run } = useWorkspace();
@@ -12,11 +12,13 @@ export function ConsultingPage() {
   const [clientId, setClientId] = useState<string | null>(data.clients[0]?.id ?? null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ type: string; item?: Record<string, any> } | null>(null);
-  useEffect(() => { if (!clientId && data.clients[0]) setClientId(data.clients[0].id); }, [clientId, data.clients]);
+  const [deleteClientOpen, setDeleteClientOpen] = useState(false);
+  useEffect(() => { if (!clientId || !data.clients.some((client) => client.id === clientId)) setClientId(data.clients[0]?.id ?? null); }, [clientId, data.clients]);
   const projects = data.consultingProjects.filter((item) => item.client_id === clientId);
-  useEffect(() => { if ((!projectId || !projects.some((item) => item.id === projectId)) && projects[0]) setProjectId(projects[0].id); }, [projectId, projects]);
+  useEffect(() => { if (!projectId || !projects.some((item) => item.id === projectId)) setProjectId(projects[0]?.id ?? null); }, [projectId, projects]);
   useEffect(() => { const value = params.get("new"); if (value) setDialog({ type: value }); }, [params]);
   const close = () => { setDialog(null); setParams({}); };
+  const client = data.clients.find((item) => item.id === clientId);
   const project = data.consultingProjects.find((item) => item.id === projectId);
   const interactions = data.consultingInteractions.filter((item) => item.project_id === projectId);
   const deliverables = data.consultingDeliverables.filter((item) => item.project_id === projectId);
@@ -26,7 +28,7 @@ export function ConsultingPage() {
   const totalFee = timeEntries.reduce((sum, item) => sum + Number(item.fee_cents || 0), 0) / 100;
   return (
     <div>
-      <PageHeader eyebrow="客户与交付" title="咨询工作" description="围绕客户、项目、沟通、交付和跟进组织咨询过程。" actions={<><Button variant="secondary" onClick={() => setDialog({ type: "client" })}><Users size={17} />添加客户</Button>{clientId ? <Button onClick={() => setDialog({ type: "project" })}><Plus size={17} />新建咨询项目</Button> : null}</>} />
+      <PageHeader eyebrow="客户与交付" title="咨询工作" description="围绕客户、项目、沟通、交付和跟进组织咨询过程。" actions={<><Button variant="secondary" onClick={() => setDialog({ type: "client" })}><Users size={17} />添加客户</Button>{clientId ? <Button onClick={() => setDialog({ type: "project" })}><Plus size={17} />新建咨询项目</Button> : null}{client ? <Button variant="ghost" className="danger-text" onClick={() => setDeleteClientOpen(true)}><Trash size={16} />删除客户</Button> : null}</>} />
       {data.clients.length === 0 ? <EmptyState title="还没有客户记录" description="添加客户后，再创建咨询项目和跟进。" action={<Button onClick={() => setDialog({ type: "client" })}>添加第一个客户</Button>} /> : <div className="consult-layout">
         <aside className="client-column"><span className="rail-label">客户</span>{data.clients.map((client) => <button className={client.id === clientId ? "active" : ""} key={client.id} onClick={() => { setClientId(client.id); setProjectId(null); }}><div className="client-avatar">{client.name.slice(0, 1)}</div><div><strong>{client.name}</strong><small>{data.consultingProjects.filter((item) => item.client_id === client.id && item.status === "active").length} 个进行中项目</small></div></button>)}</aside>
         <div className="consult-main">
@@ -49,6 +51,7 @@ export function ConsultingPage() {
         </div>
       </div>}
       <ConsultingDialog dialog={dialog} close={close} clientId={clientId} project={project} run={run} />
+      <ConfirmDialog open={deleteClientOpen} title="将客户移到回收站？" description={`“${client?.name ?? "当前客户"}”会从咨询页面隐藏；相关项目、沟通和交付记录会保留，恢复客户后可继续访问。`} confirmLabel="移到回收站" danger onClose={() => setDeleteClientOpen(false)} onConfirm={async () => { if (client) await run(() => api.remove("clients", client.id)); }} />
     </div>
   );
 }
