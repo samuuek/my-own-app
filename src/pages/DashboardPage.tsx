@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Check, Clock, ArrowRight, NotePencil, CalendarBlank, Plus, Broadcast, Code, ChatCenteredText, Barbell, BowlFood, GameController } from "@phosphor-icons/react";
+import { Check, Clock, ArrowRight, NotePencil, CalendarBlank, Plus, Broadcast, Code, ChatCenteredText, Barbell, BowlFood, GameController, ListPlus, Bug, ForkKnife } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useWorkspace } from "../WorkspaceContext";
 import { localDate, formatDuration, formatDate, classNames } from "../utils";
@@ -26,6 +26,7 @@ export function DashboardPage() {
   const [memoId, setMemoId] = useState<string | null>(activeMemo?.id ?? null);
   const [savedMemo, setSavedMemo] = useState(activeMemo?.content ?? "");
   const [memoError, setMemoError] = useState("");
+  const memoInput = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (activeMemo && !memoId) { setMemo(activeMemo.content); setSavedMemo(activeMemo.content); setMemoId(activeMemo.id); }
@@ -67,6 +68,14 @@ export function DashboardPage() {
         <div><span>已完成</span><strong>{value.overview.completed}<small> / {value.overview.total}</small></strong></div>
         <div><span>已安排</span><strong>{formatDuration(value.overview.scheduledMinutes)}</strong></div>
       </div>
+      <nav className="dashboard-command-strip glass-clear" aria-label="快速操作">
+        <span>快速操作</span>
+        <button onClick={() => navigate("/today?new=1")}><ListPlus size={17} />新建计划</button>
+        <button onClick={() => memoInput.current?.focus()}><NotePencil size={17} />记录备忘</button>
+        <button onClick={() => navigate("/development?new=work-item")}><Bug size={17} />添加工作项</button>
+        <button onClick={() => navigate("/fitness?new=workout")}><Barbell size={17} />记录训练</button>
+        <button onClick={() => navigate("/diet?new=meal")}><ForkKnife size={17} />记录饮食</button>
+      </nav>
       <div className="dashboard-grid">
         <div className="dashboard-primary">
           <Section title="今日时间线" description="有明确开始时间的事项" action={<Button variant="ghost" size="sm" onClick={() => navigate("/today")}>打开计划<ArrowRight size={15} /></Button>}>
@@ -78,7 +87,7 @@ export function DashboardPage() {
         </div>
         <aside className="dashboard-aside">
           <Section title="快速备忘" description="停顿后自动保存" className="memo-section">
-            <div className="memo-pad"><NotePencil size={19} /><textarea aria-label="快速备忘" value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="记下一闪而过的想法……" />{memoError ? <small className="field-error">{memoError}</small> : null}</div>
+            <div className="memo-pad"><NotePencil size={19} /><textarea ref={memoInput} aria-label="快速备忘" value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="记下一闪而过的想法……" />{memoError ? <small className="field-error">{memoError}</small> : null}</div>
             {memoId ? <div className="memo-actions"><Button size="sm" variant="ghost" onClick={async () => { await run(() => api.convertMemo(memoId, "planItems", { plan_date: date })); setMemo(""); setSavedMemo(""); setMemoId(null); }}>转为今日事项</Button><Button size="sm" variant="ghost" onClick={async () => { await run(() => api.convertMemo(memoId, "mediaContents", { stage: "idea" })); setMemo(""); setSavedMemo(""); setMemoId(null); }}>转为内容灵感</Button></div> : null}
           </Section>
           <Section title="需要关注" description="到期、跟进与今日提醒">

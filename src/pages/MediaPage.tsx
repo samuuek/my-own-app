@@ -61,9 +61,9 @@ export function MediaPage() {
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={analytics.points} margin={{ top: 8, right: 10, bottom: 4, left: 0 }}>
                 <CartesianGrid stroke="var(--border)" strokeDasharray="3 5" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "var(--text-soft)", fontSize: 9 }} tickLine={false} axisLine={false} />
-                <YAxis yAxisId="views" tickFormatter={formatCompactAxis} tick={{ fill: "var(--text-soft)", fontSize: 9 }} tickLine={false} axisLine={false} width={42} />
-                <YAxis yAxisId="engagement" orientation="right" tickFormatter={formatCompactAxis} tick={{ fill: "var(--text-soft)", fontSize: 9 }} tickLine={false} axisLine={false} width={42} />
+                <XAxis dataKey="label" tick={{ fill: "var(--text-soft)", fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis yAxisId="views" tickFormatter={formatCompactAxis} tick={{ fill: "var(--text-soft)", fontSize: 10 }} tickLine={false} axisLine={false} width={42} />
+                <YAxis yAxisId="engagement" orientation="right" tickFormatter={formatCompactAxis} tick={{ fill: "var(--text-soft)", fontSize: 10 }} tickLine={false} axisLine={false} width={42} />
                 <Tooltip content={<MediaTooltip />} />
                 <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
                 <Bar yAxisId="views" dataKey="views" name="播放 / 阅读" fill="var(--accent)" radius={[5, 5, 1, 1]} maxBarSize={44} />

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { X, WarningCircle, SpinnerGap } from "@phosphor-icons/react";
 import { classNames } from "../utils";
@@ -68,18 +68,40 @@ export function Modal({ title, description, open, onClose, children, wide = fals
   children: ReactNode;
   wide?: boolean;
 }) {
+  const modalRef = useRef<HTMLElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
   useEffect(() => {
     if (!open) return;
-    const handler = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => {
+      const first = modalRef.current?.querySelector<HTMLElement>("[autofocus]")
+        ?? modalRef.current?.querySelector<HTMLElement>("button, input, textarea, select, [tabindex]:not([tabindex='-1'])");
+      first?.focus();
+    });
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+      if (event.key !== "Tab" || !modalRef.current) return;
+      const focusable = [...modalRef.current.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])")];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
     document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", handler);
+      previousFocus?.focus();
+    };
   }, [open, onClose]);
   if (!open) return null;
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className={classNames("modal", wide && "modal-wide")} role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <section ref={modalRef} className={classNames("modal", "glass-regular", wide && "modal-wide")} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined}>
         <header className="modal-header">
-          <div><h2 id="modal-title">{title}</h2>{description ? <p>{description}</p> : null}</div>
+          <div><h2 id={titleId}>{title}</h2>{description ? <p id={descriptionId}>{description}</p> : null}</div>
           <IconButton label="关闭" onClick={onClose}><X size={20} /></IconButton>
         </header>
         {children}
@@ -125,25 +147,28 @@ export function EntityForm({
   return (
     <form className="entity-form" onSubmit={submit}>
       <div className="form-grid">
-        {fields.map((field) => (
+        {fields.map((field) => {
+          const invalid = Boolean(errors[field.name]);
+          return (
           <label className={classNames("form-field", field.type === "textarea" && "form-field-wide")} key={field.name}>
             <span>{field.label}{field.required ? <em>必填</em> : null}</span>
             {field.type === "textarea" ? (
-              <textarea rows={4} placeholder={field.placeholder} {...register(field.name, { required: field.required ? "请填写此项" : false })} />
+              <textarea rows={4} aria-invalid={invalid} placeholder={field.placeholder} {...register(field.name, { required: field.required ? "请填写此项" : false })} />
             ) : field.type === "select" ? (
-              <select {...register(field.name, { required: field.required ? "请选择此项" : false })}>
+              <select aria-invalid={invalid} {...register(field.name, { required: field.required ? "请选择此项" : false })}>
                 <option value="">请选择</option>
                 {field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             ) : field.type === "checkbox" ? (
               <input type="checkbox" {...register(field.name)} />
             ) : (
-              <input type={field.type ?? "text"} step={field.step} placeholder={field.placeholder} {...register(field.name, { required: field.required ? "请填写此项" : false })} />
+              <input type={field.type ?? "text"} step={field.step} aria-invalid={invalid} placeholder={field.placeholder} {...register(field.name, { required: field.required ? "请填写此项" : false })} />
             )}
             {field.helper ? <small>{field.helper}</small> : null}
-            {errors[field.name] ? <small className="field-error">{String(errors[field.name]?.message)}</small> : null}
+            {invalid ? <small className="field-error"><WarningCircle size={12} weight="fill" aria-hidden />{String(errors[field.name]?.message)}</small> : null}
           </label>
-        ))}
+          );
+        })}
       </div>
       <footer className="modal-actions">
         <Button type="button" variant="ghost" onClick={onCancel}>取消</Button>
@@ -183,7 +208,7 @@ export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?:
 
 export function Section({ title, description, action, children, className }: { title: string; description?: string; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={classNames("section", className)}>
+    <section className={classNames("section", "frosted-content", className)}>
       <header className="section-header"><div><h2>{title}</h2>{description ? <p>{description}</p> : null}</div>{action}</header>
       {children}
     </section>

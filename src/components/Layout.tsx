@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   House, CalendarCheck, Broadcast, Code, ChatCenteredText, Barbell, BowlFood, GameController,
@@ -39,12 +39,26 @@ const collectionRoutes: Record<string, string> = {
   playSessions: "/entertainment", quickMemos: "/",
 };
 
+const routeMeta: Record<string, { label: string; module: string }> = {
+  "/": { label: "首页总览", module: "dashboard" },
+  "/today": { label: "今日计划", module: "today" },
+  "/media": { label: "自媒体", module: "media" },
+  "/development": { label: "开发工作", module: "development" },
+  "/consulting": { label: "咨询工作", module: "consulting" },
+  "/fitness": { label: "健身计划", module: "fitness" },
+  "/diet": { label: "饮食计划", module: "diet" },
+  "/entertainment": { label: "游戏娱乐", module: "entertainment" },
+  "/settings": { label: "数据与设置", module: "settings" },
+};
+
 export function AppLayout() {
   const { data, saveNow, saveStatus } = useWorkspace();
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus, staleTime: 30_000 });
+  const currentPage = routeMeta[location.pathname] ?? routeMeta["/"];
 
   useEffect(() => {
     const theme = data.settings.theme ?? "light";
@@ -63,8 +77,9 @@ export function AppLayout() {
   }, []);
 
   return (
-    <div className={classNames("app-shell", collapsed && "sidebar-collapsed")}>
-      <aside className="sidebar">
+    <div className={classNames("app-shell", collapsed && "sidebar-collapsed")} data-module={currentPage.module}>
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
+      <aside className="sidebar glass-regular">
         <div className="brand"><div className="brand-mark">木</div><div className="brand-copy"><strong>木子工作台</strong><span>本地个人空间</span></div></div>
         <Button className="quick-create" onClick={() => setQuickOpen(true)}><Plus size={18} />快速新增</Button>
         <nav aria-label="主导航">
@@ -84,18 +99,19 @@ export function AppLayout() {
         </div>
       </aside>
       <div className="app-main">
-        <header className="topbar">
+        <header className="topbar glass-clear">
           <div className="topbar-left">
             <IconButton label={collapsed ? "展开导航" : "收起导航"} onClick={() => setCollapsed((value) => !value)}><SidebarSimple size={20} /></IconButton>
-            <div className="today-label"><span>{new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date())}</span><strong>{new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(new Date())}</strong></div>
+            <div className="toolbar-context"><strong>{currentPage.label}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date())}</span></div>
           </div>
           <div className="topbar-actions">
-            <button className="search-trigger" onClick={() => setSearchOpen(true)}><MagnifyingGlass size={18} /><span>搜索所有内容</span><kbd><Command size={12} />K</kbd></button>
-            <Button variant="secondary" size="sm" loading={saveStatus === "saving"} onClick={() => void saveNow().catch(() => undefined)}><FloppyDisk size={16} />手动保存</Button>
+            <button className="search-trigger glass-clear" aria-label="搜索所有内容" title="搜索所有内容" onClick={() => setSearchOpen(true)}><MagnifyingGlass size={18} /><span>搜索所有内容</span><kbd><Command size={12} />K</kbd></button>
+            <Button className="topbar-create" variant="secondary" size="sm" onClick={() => setQuickOpen(true)}><Plus size={16} />快速新建</Button>
+            <Button className="manual-save" variant="secondary" size="sm" loading={saveStatus === "saving"} onClick={() => void saveNow().catch(() => undefined)}><FloppyDisk size={16} />手动保存</Button>
             <SaveIndicator status={saveStatus} />
           </div>
         </header>
-        <main className="page-container"><Outlet /></main>
+        <main className="page-container" id="main-content" tabIndex={-1}><Outlet /></main>
       </div>
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       <QuickCreateModal open={quickOpen} onClose={() => setQuickOpen(false)} />
@@ -128,7 +144,7 @@ function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   const moduleNames: Record<string, string> = { dashboard: "首页", today: "今日计划", media: "自媒体", development: "开发工作", consulting: "咨询工作", fitness: "健身计划", diet: "饮食计划", entertainment: "游戏娱乐" };
   return (
     <Modal open={open} title="搜索工作台" description="按模块查找标题、笔记和记录内容" onClose={onClose} wide>
-      <div className="command-search"><MagnifyingGlass size={20} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入关键词" /></div>
+      <div className="command-search glass-clear"><MagnifyingGlass size={20} /><input autoFocus aria-label="搜索关键词" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入关键词" /></div>
       <div className="search-results">
         {!query ? <div className="search-hint">输入内容开始搜索，按 Esc 关闭。</div> : search.isLoading ? <Skeleton lines={4} /> : search.error ? <ErrorState message={(search.error as Error).message} /> : search.data?.length === 0 ? <div className="search-hint">没有找到匹配内容。</div> : Object.entries(grouped).map(([module, items]) => (
           <section className="search-group" key={module}><h3>{moduleNames[module] ?? module}</h3>{items.map((item) => (

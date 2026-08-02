@@ -30,6 +30,78 @@ test("opens locally, uses no external runtime resources, and reaches all nine pa
   expect(externalRequests).toEqual([]);
 });
 
+test("keeps the Liquid Glass shell readable at both target desktop sizes", async ({ page }) => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1728, height: 1117 }]) {
+    await page.setViewportSize(viewport);
+    for (const path of ["/", "/media", "/fitness", "/diet", "/settings"]) {
+      await page.goto(path);
+      await expect(page.locator(".sidebar")).toBeVisible();
+      await expect(page.locator(".topbar")).toBeVisible();
+      await expect(page.getByRole("button", { name: "手动保存" })).toBeVisible();
+      const layout = await page.evaluate(() => ({
+        viewportWidth: document.documentElement.clientWidth,
+        pageWidth: document.documentElement.scrollWidth,
+        mainWidth: document.querySelector("main")?.getBoundingClientRect().width ?? 0,
+      }));
+      expect(layout.pageWidth).toBeLessThanOrEqual(layout.viewportWidth);
+      expect(layout.mainWidth).toBeGreaterThan(700);
+    }
+    await page.goto("/");
+    const topbarMaterial = await page.locator(".topbar").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return style.backdropFilter;
+    });
+    expect(topbarMaterial).toContain("blur");
+
+    // 内容承载层必须是半透明的磨砂表面：既不是全透明，也不是不透明实色。
+    const frosted = await page.locator(".dashboard-primary .section").first().evaluate((element) => {
+      const style = getComputedStyle(element);
+      const parts = style.backgroundColor.match(/[\d.]+/g) ?? [];
+      return { alpha: parts.length >= 4 ? Number(parts[parts.length - 1]) : 1, backdrop: style.backdropFilter };
+    });
+    expect(frosted.alpha).toBeGreaterThan(0.4);
+    expect(frosted.alpha).toBeLessThan(1);
+    expect(frosted.backdrop).toContain("blur");
+  }
+});
+
+test("keeps row menus above completed rows and opaque enough to read", async ({ page, request }) => {
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+  const done = await create(request, "planItems", { title: "层叠回归·已完成", plan_date: today, start_time: "08:00", priority: "medium" });
+  await request.post(`/api/plan-items/${done.id}/complete`);
+  const next = await create(request, "planItems", { title: "层叠回归·后续事项", plan_date: today, start_time: "09:00", priority: "high" });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/today");
+  const doneRow = page.locator(".plan-table-row.is-done").first();
+  await expect(doneRow).toBeVisible();
+  await doneRow.locator(".icon-button").click();
+  const menu = page.locator(".row-menu");
+  await expect(menu).toBeVisible();
+
+  // 已完成行不能用 opacity 变淡：那会建立层叠上下文，把浮出菜单困在行内。
+  await expect(doneRow).toHaveCSS("opacity", "1");
+
+  const probe = await menu.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    // rgb(...) 为 3 个分量、rgba(...) 与 color(srgb ... / a) 为 4 个，末位即 alpha
+    const parts = getComputedStyle(element).backgroundColor.match(/[\d.]+/g) ?? [];
+    return {
+      menuOnTop: Boolean(hit && element.contains(hit)),
+      alpha: parts.length >= 4 ? Number(parts[parts.length - 1]) : 1,
+    };
+  });
+  expect(probe.menuOnTop).toBe(true);
+  expect(probe.alpha).toBeGreaterThanOrEqual(0.8);
+
+  // 这些夹具只服务本用例，清理干净以免影响后续用例的今日进度断言
+  for (const id of [done.id, next.id]) {
+    await request.delete(`/api/collections/planItems/${id}`);
+    await request.delete(`/api/collections/planItems/${id}/permanent`);
+  }
+});
+
 test("creates, schedules, displays and completes a daily plan item", async ({ page }) => {
   await page.goto("/today");
   await page.locator("header").getByRole("button", { name: "添加事项" }).click();

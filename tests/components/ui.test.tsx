@@ -1,7 +1,20 @@
-import { render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ConfirmDialog, EmptyState, EntityForm, ErrorState, Skeleton } from "../../src/components/ui";
+import { ConfirmDialog, EmptyState, EntityForm, ErrorState, Modal, Skeleton } from "../../src/components/ui";
+
+function ModalHarness() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)}>打开弹窗</button>
+      <Modal open={open} title="键盘操作" description="验证焦点不会离开弹窗" onClose={() => setOpen(false)}>
+        <button>继续操作</button>
+      </Modal>
+    </>
+  );
+}
 
 describe("shared interaction components", () => {
   it("validates required fields and converts numeric input before saving", async () => {
@@ -33,5 +46,19 @@ describe("shared interaction components", () => {
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(onClose).toHaveBeenCalledOnce();
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("traps keyboard focus inside a modal and restores it after closing", async () => {
+    const user = userEvent.setup();
+    render(<ModalHarness />);
+    const trigger = screen.getByRole("button", { name: "打开弹窗" });
+    await user.click(trigger);
+    const close = screen.getByRole("button", { name: "关闭" });
+    await waitFor(() => expect(close).toHaveFocus());
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "继续操作" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });
