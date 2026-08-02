@@ -99,6 +99,21 @@ test("auto-saves a quick memo across reload and converts it into today's plan", 
   await expect(page.getByText("自动保存并转换的备忘")).toBeVisible();
 });
 
+test("adds a development work item from the work-item section", async ({ page, request }) => {
+  await create(request, "devProjects", { name: "入口验收项目", status: "active" });
+  await page.goto("/development");
+  const section = page.locator("section.section").filter({ has: page.getByRole("heading", { level: 2, name: "工作项" }) });
+  await expect(section.getByRole("button", { name: "添加工作项" })).toBeVisible();
+  await section.getByRole("button", { name: "添加工作项" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel(/标题/).fill("从区块入口新增的 Bug");
+  await dialog.getByLabel(/类型/).selectOption("bug");
+  await dialog.getByLabel(/优先级/).selectOption("high");
+  await dialog.getByLabel(/说明/).fill("验证工作项入口始终可见");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(section.getByText("从区块入口新增的 Bug")).toBeVisible();
+});
+
 test("renders distinct records in every specialized module", async ({ page, request }) => {
   const devProject = await create(request, "devProjects", { name: "验收开发项目", status: "active" });
   const milestone = await create(request, "devMilestones", { project_id: devProject.id, name: "验收里程碑", target_date: "2026-08-20", status: "open" });
