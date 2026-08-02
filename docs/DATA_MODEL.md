@@ -10,7 +10,7 @@
 | 自媒体 | `media_contents` | 灵感到发布的五阶段流程、素材位置、发布链接和表现数据 |
 | 开发 | `dev_projects`、`dev_milestones`、`dev_work_items`、`dev_logs` | 项目、里程碑、类型化工作项和连续开发日志 |
 | 咨询 | `clients`、`consulting_projects`、`consulting_interactions`、`consulting_deliverables`、`consulting_followups`、`consulting_time_entries` | 客户、项目、沟通、交付、跟进、时长和费用 |
-| 健身 | `workout_templates`、`workout_template_exercises`、`workouts`、`workout_exercises`、`workout_sets`、`body_metrics` | 训练模板与实际训练快照、逐组数据和身体指标 |
+| 健身 | `workout_templates`、`workout_template_exercises`、`workouts`、`workout_exercises`、`workout_sets`、`body_metrics` | 训练部位、模板与实际训练快照、逐组数据和身体指标 |
 | 饮食 | `nutrition_targets`、`foods`、`meals`、`meal_items` | 生效日营养目标、常用食物、计划/实际餐食和营养明细 |
 | 娱乐 | `entertainment_items`、`play_sessions` | 娱乐清单、状态、进度、目标和游玩时长 |
 | 系统 | `settings`、`trash_entries`、`schema_migrations` | 使用偏好、回收站索引和数据库版本 |

@@ -1,5 +1,6 @@
 // @vitest-environment node
 import fs from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../server/app.js";
 import { getAppPaths } from "../../server/config.js";
@@ -40,6 +41,44 @@ describe("SQLite persistence and migrations", () => {
       expect(plan.some((row) => row.detail.includes("idx_plan_items_date_status"))).toBe(true);
     } finally {
       manager.close();
+    }
+  });
+
+  it("upgrades an existing database without losing workout data", () => {
+    directory = makeTestDirectory("upgrade");
+    const oldMigrations = path.join(directory, "old-migrations");
+    fs.mkdirSync(oldMigrations, { recursive: true });
+    fs.copyFileSync(
+      path.resolve("database/migrations/001_initial.sql"),
+      path.join(oldMigrations, "001_initial.sql"),
+    );
+
+    const paths = getAppPaths(directory);
+    const oldManager = new DatabaseManager(paths, oldMigrations);
+    try {
+      oldManager.db.prepare(`
+        INSERT INTO workout_templates(id, name, weekday, notes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run("existing-template", "原有训练模板", 1, "升级后不能丢失", "2026-08-01T08:00:00.000Z", "2026-08-01T08:00:00.000Z");
+    } finally {
+      oldManager.close();
+    }
+
+    const upgradedManager = new DatabaseManager(paths);
+    try {
+      const template = upgradedManager.db.prepare(
+        "SELECT name, notes, body_part FROM workout_templates WHERE id = ?",
+      ).get("existing-template") as { name: string; notes: string; body_part: string };
+      const workoutColumns = upgradedManager.db.pragma("table_info(workouts)") as Array<{ name: string }>;
+      const versions = upgradedManager.db.prepare(
+        "SELECT version FROM schema_migrations ORDER BY version",
+      ).all() as Array<{ version: string }>;
+
+      expect(template).toEqual({ name: "原有训练模板", notes: "升级后不能丢失", body_part: "" });
+      expect(workoutColumns.map((column) => column.name)).toContain("body_part");
+      expect(versions.at(-1)?.version).toBe("002_workout_body_part.sql");
+    } finally {
+      upgradedManager.close();
     }
   });
 

@@ -108,7 +108,7 @@ export const collectionDefinitions = {
     title: "name",
     module: "fitness",
     required: ["name"],
-    fields: ["name", "weekday", "notes"],
+    fields: ["name", "body_part", "weekday", "notes"],
     search: ["name", "notes"],
   },
   workoutTemplateExercises: {
@@ -124,7 +124,7 @@ export const collectionDefinitions = {
     title: "name",
     module: "fitness",
     required: ["name", "workout_date"],
-    fields: ["template_id", "name", "workout_date", "status", "feeling", "started_at", "completed_at"],
+    fields: ["template_id", "name", "body_part", "workout_date", "status", "feeling", "started_at", "completed_at"],
     search: ["name", "feeling"],
   },
   workoutExercises: {

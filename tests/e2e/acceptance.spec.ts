@@ -129,6 +129,30 @@ test("deletes a consulting client through a confirmed trash action", async ({ pa
   await expect(page.locator(".trash-list article").filter({ hasText: "待删除咨询客户" })).toBeVisible();
 });
 
+test("shows workout and meal details in monthly calendars", async ({ page, request }) => {
+  const template = await create(request, "workoutTemplates", { name: "日历力量训练", body_part: "上肢", weekday: 7 });
+  const workout = await create(request, "workouts", { template_id: template.id, name: "周日训练", body_part: "上肢", workout_date: "2026-08-02", status: "completed" });
+  const exercise = await create(request, "workoutExercises", { workout_id: workout.id, name: "卧推", sort_order: 0 });
+  await create(request, "workoutSets", { workout_exercise_id: exercise.id, set_number: 1, reps: 8, weight: 50, completed: 1 });
+  await create(request, "workoutSets", { workout_exercise_id: exercise.id, set_number: 2, reps: 8, weight: 50, completed: 1 });
+  const meal = await create(request, "meals", { meal_date: "2026-08-02", meal_type: "dinner", name: "日历验收晚餐", entry_kind: "actual" });
+  await create(request, "mealItems", { meal_id: meal.id, food_name: "鸡肉饭", quantity: 1, calories: 420, protein: 32 });
+
+  await page.goto("/fitness");
+  const workoutDay = page.locator('.month-calendar-day[data-date="2026-08-02"]');
+  await expect(page.getByRole("heading", { name: "训练日历" })).toBeVisible();
+  await expect(workoutDay).toContainText("上肢");
+  await expect(workoutDay).toContainText("卧推 16次");
+
+  await page.goto("/diet");
+  const mealDay = page.locator('.month-calendar-day[data-date="2026-08-02"]');
+  await expect(page.getByRole("heading", { name: "饮食日历" })).toBeVisible();
+  await expect(mealDay).toContainText("实际 · 晚餐");
+  await expect(mealDay).toContainText("日历验收晚餐 · 420 kcal");
+  await page.locator('.month-calendar-day[data-date="2026-08-03"]').click();
+  await expect(page.locator('.diet-toolbar input[type="date"]')).toHaveValue("2026-08-03");
+});
+
 test("renders distinct records in every specialized module", async ({ page, request }) => {
   const devProject = await create(request, "devProjects", { name: "验收开发项目", status: "active" });
   const milestone = await create(request, "devMilestones", { project_id: devProject.id, name: "验收里程碑", target_date: "2026-08-20", status: "open" });

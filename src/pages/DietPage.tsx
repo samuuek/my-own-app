@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { Plus, BowlFood, ForkKnife, Copy, Target, CalendarBlank } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useWorkspace } from "../WorkspaceContext";
+import { MonthCalendar } from "../components/MonthCalendar";
 import { addDays, localDate } from "../utils";
 import { Badge, Button, EmptyState, EntityForm, Modal, PageHeader, Section, type FieldDefinition } from "../components/ui";
 
@@ -12,6 +13,7 @@ export function DietPage() {
   const { data, run } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const [date, setDate] = useState(localDate());
+  const [calendarMonth, setCalendarMonth] = useState(localDate().slice(0, 7));
   const [dialog, setDialog] = useState<{ type: string; item?: Record<string, any> } | null>(null);
   useEffect(() => { const value = params.get("new"); if (value) setDialog({ type: value }); }, [params]);
   const close = () => { setDialog(null); setParams({}); };
@@ -26,7 +28,10 @@ export function DietPage() {
   return (
     <div>
       <PageHeader eyebrow="计划与实际摄入" title="饮食计划" description="先决定吃什么，再记录实际摄入；未知营养数据可以留空。" actions={<><Button variant="secondary" onClick={() => setDialog({ type: "food" })}><Plus size={16} />常用食物</Button><Button onClick={() => setDialog({ type: "meal" })}><ForkKnife size={17} />记录餐食</Button></>} />
-      <div className="diet-toolbar"><label className="date-control"><CalendarBlank size={16} /><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><Button variant="ghost" size="sm" onClick={() => void copyYesterday()}><Copy size={15} />复制昨天的计划</Button><Button variant="ghost" size="sm" onClick={() => setDialog({ type: "target" })}><Target size={15} />设置营养目标</Button></div>
+      <div className="diet-toolbar"><label className="date-control"><CalendarBlank size={16} /><input type="date" value={date} onChange={(event) => { setDate(event.target.value); setCalendarMonth(event.target.value.slice(0, 7)); }} /></label><Button variant="ghost" size="sm" onClick={() => void copyYesterday()}><Copy size={15} />复制昨天的计划</Button><Button variant="ghost" size="sm" onClick={() => setDialog({ type: "target" })}><Target size={15} />设置营养目标</Button></div>
+      <Section title="饮食日历" description="按天查看计划餐食、实际摄入和已记录热量">
+        <MonthCalendar month={calendarMonth} selectedDate={date} onMonthChange={setCalendarMonth} onSelectDate={(value) => { setDate(value); setCalendarMonth(value.slice(0, 7)); }} renderDay={(value) => <MealCalendarDay date={value} data={data} />} />
+      </Section>
       <div className="nutrition-strip"><NutritionMetric label="热量" value={totals.calories} target={target?.calories} unit="kcal" /><NutritionMetric label="蛋白质" value={totals.protein} target={target?.protein} unit="g" /><NutritionMetric label="碳水" value={totals.carbs} target={target?.carbs} unit="g" /><NutritionMetric label="脂肪" value={totals.fat} target={target?.fat} unit="g" /></div>
       <div className="meal-columns">{mealTypes.map((type) => {
         const entries = meals.filter((meal) => meal.meal_type === type.value);
@@ -40,6 +45,16 @@ export function DietPage() {
       <DietDialog dialog={dialog} close={close} date={date} foods={data.foods} run={run} />
     </div>
   );
+}
+
+function MealCalendarDay({ date, data }: { date: string; data: any }) {
+  const meals = data.meals.filter((meal: any) => meal.meal_date === date);
+  if (!meals.length) return null;
+  return <>{meals.slice(0, 2).map((meal: any) => {
+    const calories = data.mealItems.filter((item: any) => item.meal_id === meal.id).reduce((sum: number, item: any) => sum + Number(item.calories || 0), 0);
+    const mealType = mealTypes.find((type) => type.value === meal.meal_type)?.label ?? "餐食";
+    return <div className={`calendar-entry meal-${meal.entry_kind}`} key={meal.id}><strong>{meal.entry_kind === "actual" ? "实际" : "计划"} · {mealType}</strong><span>{meal.name}{calories ? ` · ${Math.round(calories)} kcal` : ""}</span></div>;
+  })}{meals.length > 2 ? <small className="calendar-more">另有 {meals.length - 2} 餐</small> : null}</>;
 }
 
 function NutritionMetric({ label, value, target, unit }: { label: string; value: number; target?: number; unit: string }) {

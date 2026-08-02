@@ -17,9 +17,9 @@ async function create(collection: string, payload: Record<string, any>) {
 
 describe("specialized life modules", () => {
   it("keeps workout templates separate from actual exercise sets and body history", async () => {
-    const template = await create("workoutTemplates", { name: "上肢力量", weekday: 2, notes: "稳步加重" });
+    const template = await create("workoutTemplates", { name: "上肢力量", body_part: "胸部与背部", weekday: 2, notes: "稳步加重" });
     const templateExercise = await create("workoutTemplateExercises", { template_id: template.id, name: "卧推", target_sets: 3, target_reps: 8, target_weight: 50, rest_seconds: 120, sort_order: 0 });
-    const workout = await create("workouts", { template_id: template.id, name: "上肢力量", workout_date: "2026-08-02", status: "in_progress", started_at: "2026-08-02T16:00:00.000Z" });
+    const workout = await create("workouts", { template_id: template.id, name: "上肢力量", body_part: template.body_part, workout_date: "2026-08-02", status: "in_progress", started_at: "2026-08-02T16:00:00.000Z" });
     const exercise = await create("workoutExercises", { workout_id: workout.id, name: "卧推", sort_order: 0 });
     const set = await create("workoutSets", { workout_exercise_id: exercise.id, set_number: 1, reps: 8, weight: 52.5, completed: 1 });
     await create("bodyMetrics", { metric_date: "2026-08-02", weight: 72.4, waist: 81.2, notes: "晨起" });
@@ -28,6 +28,8 @@ describe("specialized life modules", () => {
     expect(state.workoutTemplateExercises[0].target_weight).toBe(55);
     expect(state.workoutSets.find((item: any) => item.id === set.id).weight).toBe(52.5);
     expect(state.bodyMetrics[0]).toMatchObject({ weight: 72.4, waist: 81.2 });
+    expect(state.workoutTemplates[0].body_part).toBe("胸部与背部");
+    expect(state.workouts[0].body_part).toBe("胸部与背部");
   });
 
   it("stores planned meals separately from actual intake and preserves unknown nutrition", async () => {
