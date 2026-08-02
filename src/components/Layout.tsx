@@ -40,7 +40,7 @@ const collectionRoutes: Record<string, string> = {
 };
 
 export function AppLayout() {
-  const { data, saveStatus } = useWorkspace();
+  const { data, saveNow, saveStatus } = useWorkspace();
   const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -91,6 +91,7 @@ export function AppLayout() {
           </div>
           <div className="topbar-actions">
             <button className="search-trigger" onClick={() => setSearchOpen(true)}><MagnifyingGlass size={18} /><span>搜索所有内容</span><kbd><Command size={12} />K</kbd></button>
+            <Button variant="secondary" size="sm" loading={saveStatus === "saving"} onClick={() => void saveNow().catch(() => undefined)}><FloppyDisk size={16} />手动保存</Button>
             <SaveIndicator status={saveStatus} />
           </div>
         </header>

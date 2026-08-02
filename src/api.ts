@@ -45,6 +45,7 @@ export const api = {
   settings: () => request<Record<string, any>>("/api/settings"),
   saveSettings: (input: Record<string, any>) => request<Record<string, any>>("/api/settings", { method: "PUT", body: JSON.stringify(input) }),
   systemStatus: () => request<Record<string, any>>("/api/system/status"),
+  saveNow: () => request<{ savedAt: string; database: string; dataFile: string }>("/api/system/save", { method: "POST" }),
   openDataDirectory: () => request<Record<string, any>>("/api/system/open-data-directory", { method: "POST" }),
   openPath: (path: string) => request<Record<string, any>>("/api/system/open-path", { method: "POST", body: JSON.stringify({ path }) }),
   backups: () => request<BackupRecord[]>("/api/backups"),

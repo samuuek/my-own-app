@@ -1,6 +1,6 @@
 # 第一版验收覆盖
 
-本表把 `PRD.md` 中 AC-001 至 AC-039 映射到可重复执行的检查。自动化总入口为 `npm run test:all`。涉及“重启电脑”的标准通过完全关闭进程后从同一独立 SQLite 文件重新读取来做等价自动化；这是应用能控制的持久化边界，真实电脑重启不引入额外内存状态。
+本表把 `PRD.md` 中 AC-001 至 AC-040 映射到可重复执行的检查。自动化总入口为 `npm run test:all`。涉及“重启电脑”的标准通过完全关闭进程后从同一独立 SQLite 文件重新读取来做等价自动化；这是应用能控制的持久化边界，真实电脑重启不引入额外内存状态。
 
 | 标准 | 覆盖方式 |
 | --- | --- |
@@ -39,5 +39,6 @@
 | AC-037 | `backup-export.test.ts` 损坏备份后验证拒绝覆盖、当前数据与主库完整性不变 |
 | AC-038 | `backup-export.test.ts` 制造备份写入失败；`app-shell.test.tsx` 验证界面错误提示 |
 | AC-039 | `backup-export.test.ts` 解压验证 manifest、全量 JSON、各集合 CSV；E2E 验证下载 |
+| AC-040 | `persistence.test.ts` 验证 WAL 检查点、数据库完整性与重启持久化；`app-shell.test.tsx` 验证入口和成功状态；E2E 验证手动保存未到延时的快速备忘 |
 
 最终回归时还会执行 ESLint、两套 TypeScript 检查、Vite/服务端生产构建、生产静态资源检查、真实生产进程和桌面启动器测试。

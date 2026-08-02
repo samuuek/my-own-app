@@ -30,6 +30,36 @@ describe("SQLite persistence and migrations", () => {
     }
   });
 
+  it("manually checkpoints pending writes into the local data file", async () => {
+    directory = makeTestDirectory("manual-save");
+    const first = await buildApp({ dataDir: directory, autoBackup: false });
+    const dataFile = getAppPaths(directory).dataFile;
+    const created = await first.inject({
+      method: "POST",
+      url: "/api/collections/planItems",
+      payload: { title: "手动保存验证", plan_date: "2026-08-02" },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(fs.statSync(`${dataFile}-wal`).size).toBeGreaterThan(0);
+
+    const saved = await first.inject({ method: "POST", url: "/api/system/save" });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().data).toMatchObject({ database: "ok", dataFile });
+    expect(new Date(saved.json().data.savedAt).toISOString()).toBe(saved.json().data.savedAt);
+    expect(fs.existsSync(`${dataFile}-wal`) ? fs.statSync(`${dataFile}-wal`).size : 0).toBe(0);
+    await first.close();
+
+    const second = await buildApp({ dataDir: directory, autoBackup: false });
+    try {
+      const state = await second.inject({ method: "GET", url: "/api/state" });
+      expect(state.json().data.planItems).toEqual(expect.arrayContaining([
+        expect.objectContaining({ title: "手动保存验证" }),
+      ]));
+    } finally {
+      await second.close();
+    }
+  });
+
   it("creates the complete first schema and uses the date/status index", () => {
     directory = makeTestDirectory("schema");
     const manager = new DatabaseManager(getAppPaths(directory));

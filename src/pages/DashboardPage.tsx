@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Check, Clock, ArrowRight, NotePencil, CalendarBlank, Plus, Broadcast, Code, ChatCenteredText, Barbell, BowlFood, GameController } from "@phosphor-icons/react";
@@ -19,33 +19,41 @@ const summaryMeta: Record<string, { title: string; route: string; icon: typeof B
 export function DashboardPage() {
   const date = localDate();
   const dashboard = useQuery({ queryKey: ["dashboard", date], queryFn: () => api.dashboard(date) });
-  const { data, run } = useWorkspace();
+  const { data, registerSaveHandler, run } = useWorkspace();
   const navigate = useNavigate();
   const activeMemo = useMemo(() => data.quickMemos.find((item) => !item.archived_at && !item.converted_id), [data.quickMemos]);
   const [memo, setMemo] = useState(activeMemo?.content ?? "");
   const [memoId, setMemoId] = useState<string | null>(activeMemo?.id ?? null);
+  const [savedMemo, setSavedMemo] = useState(activeMemo?.content ?? "");
   const [memoError, setMemoError] = useState("");
 
   useEffect(() => {
-    if (activeMemo && !memoId) { setMemo(activeMemo.content); setMemoId(activeMemo.id); }
+    if (activeMemo && !memoId) { setMemo(activeMemo.content); setSavedMemo(activeMemo.content); setMemoId(activeMemo.id); }
   }, [activeMemo, memoId]);
 
-  useEffect(() => {
-    if (!memo.trim()) return;
-    const timer = window.setTimeout(async () => {
-      try {
-        setMemoError("");
-        if (memoId) await run(() => api.update("quickMemos", memoId, { content: memo }));
-        else {
-          const created = await run(() => api.create("quickMemos", { content: memo }));
-          setMemoId(created.id);
-        }
-      } catch (error) {
-        setMemoError((error as Error).message);
+  const persistMemo = useCallback(async () => {
+    if (memo === savedMemo || (!memo.trim() && !memoId)) return;
+    try {
+      setMemoError("");
+      if (memoId) await run(() => api.update("quickMemos", memoId, { content: memo }));
+      else {
+        const created = await run(() => api.create("quickMemos", { content: memo }));
+        setMemoId(created.id);
       }
-    }, 700);
+      setSavedMemo(memo);
+    } catch (error) {
+      setMemoError((error as Error).message);
+      throw error;
+    }
+  }, [memo, memoId, run, savedMemo]);
+
+  useEffect(() => {
+    if (memo === savedMemo || (!memo.trim() && !memoId)) return;
+    const timer = window.setTimeout(() => void persistMemo().catch(() => undefined), 700);
     return () => window.clearTimeout(timer);
-  }, [memo, memoId, run]);
+  }, [memo, memoId, persistMemo, savedMemo]);
+
+  useEffect(() => registerSaveHandler(persistMemo), [persistMemo, registerSaveHandler]);
 
   if (dashboard.isLoading) return <><PageHeader eyebrow="今天" title="正在整理你的工作台" description="读取今天的计划和各模块状态" /><Skeleton lines={8} /></>;
   if (dashboard.error || !dashboard.data) return <ErrorState message={(dashboard.error as Error)?.message ?? "首页数据不可用"} onRetry={() => dashboard.refetch()} />;
@@ -71,7 +79,7 @@ export function DashboardPage() {
         <aside className="dashboard-aside">
           <Section title="快速备忘" description="停顿后自动保存" className="memo-section">
             <div className="memo-pad"><NotePencil size={19} /><textarea aria-label="快速备忘" value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="记下一闪而过的想法……" />{memoError ? <small className="field-error">{memoError}</small> : null}</div>
-            {memoId ? <div className="memo-actions"><Button size="sm" variant="ghost" onClick={async () => { await run(() => api.convertMemo(memoId, "planItems", { plan_date: date })); setMemo(""); setMemoId(null); }}>转为今日事项</Button><Button size="sm" variant="ghost" onClick={async () => { await run(() => api.convertMemo(memoId, "mediaContents", { stage: "idea" })); setMemo(""); setMemoId(null); }}>转为内容灵感</Button></div> : null}
+            {memoId ? <div className="memo-actions"><Button size="sm" variant="ghost" onClick={async () => { await run(() => api.convertMemo(memoId, "planItems", { plan_date: date })); setMemo(""); setSavedMemo(""); setMemoId(null); }}>转为今日事项</Button><Button size="sm" variant="ghost" onClick={async () => { await run(() => api.convertMemo(memoId, "mediaContents", { stage: "idea" })); setMemo(""); setSavedMemo(""); setMemoId(null); }}>转为内容灵感</Button></div> : null}
           </Section>
           <Section title="需要关注" description="到期、跟进与今日提醒">
             {value.attention.length ? <div className="attention-list">{value.attention.map((item) => <button key={`${item.attention_type}-${item.id}`} onClick={() => navigate(item.module === "today" ? "/today" : `/${item.module}`)}><span className="attention-mark" /><div><strong>{item.display_title || item.title || item.name || item.content}</strong><small>{item.due_date ? `截止 ${formatDate(item.due_date)}` : item.followup_at ? `跟进 ${formatDate(item.followup_at)}` : "需要处理"}</small></div><ArrowRight size={16} /></button>)}</div> : <p className="quiet-line">目前没有紧急事项。</p>}

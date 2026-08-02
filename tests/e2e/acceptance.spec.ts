@@ -99,6 +99,15 @@ test("auto-saves a quick memo across reload and converts it into today's plan", 
   await expect(page.getByText("自动保存并转换的备忘")).toBeVisible();
 });
 
+test("manually saves a pending quick memo before the automatic delay", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("快速备忘").fill("手动保存的未提交备忘");
+  await page.getByRole("button", { name: "手动保存" }).click();
+  await expect(page.getByRole("status")).toContainText("已保存");
+  await page.reload();
+  await expect(page.getByLabel("快速备忘")).toHaveValue("手动保存的未提交备忘");
+});
+
 test("adds a development work item from the work-item section", async ({ page, request }) => {
   await create(request, "devProjects", { name: "入口验收项目", status: "active" });
   await page.goto("/development");

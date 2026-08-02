@@ -8,14 +8,17 @@ import { useWorkspace, WorkspaceProvider } from "../../src/WorkspaceContext";
 const collections = ["planItems", "quickMemos", "mediaContents", "devProjects", "devMilestones", "devWorkItems", "devLogs", "clients", "consultingProjects", "consultingInteractions", "consultingDeliverables", "consultingFollowups", "consultingTimeEntries", "workoutTemplates", "workoutTemplateExercises", "workouts", "workoutExercises", "workoutSets", "bodyMetrics", "nutritionTargets", "foods", "meals", "mealItems", "entertainmentItems", "playSessions"];
 
 function mockApi(theme = "light", backupStatus: Record<string, any> | null = null) {
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     let data: any = null;
     if (url.startsWith("/api/state")) data = { ...Object.fromEntries(collections.map((name) => [name, []])), settings: { theme }, trash: [] };
     else if (url.startsWith("/api/dashboard")) data = { date: "2026-08-02", overview: { completed: 0, total: 0, progress: 0, scheduledMinutes: 0 }, timeline: [], unscheduled: [], attention: [], summaries: { media: [], development: [], consulting: [], fitness: [], diet: [], entertainment: [] } };
     else if (url.startsWith("/api/system/status")) data = { latestBackup: null, backupStatus };
+    else if (url.startsWith("/api/system/save")) data = { savedAt: "2026-08-02T12:00:00.000Z", database: "ok", dataFile: "/tmp/app.sqlite" };
     return { ok: true, status: 200, json: async () => ({ data }) } as Response;
-  }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 function SaveFailureTrigger() {
@@ -53,6 +56,17 @@ describe("application shell", () => {
     render(<QueryClientProvider client={client}><WorkspaceProvider><SaveFailureTrigger /><App /></WorkspaceProvider></QueryClientProvider>);
     await userEvent.click(await screen.findByRole("button", { name: "制造保存失败" }));
     expect(await screen.findByRole("status")).toHaveTextContent("保存失败");
+  });
+
+  it("offers a manual save button and confirms a successful disk save", async () => {
+    const fetchMock = mockApi();
+    renderApp();
+    await userEvent.click(await screen.findByRole("button", { name: "手动保存" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/system/save",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
   });
 
   it("surfaces automatic backup failure in the application shell", async () => {

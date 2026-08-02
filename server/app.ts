@@ -163,6 +163,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   app.get("/api/system/status", async () => ({ data: systemStatus(paths, backups) }));
   app.get("/api/system/data-file", async () => ({ data: fileInfo(paths.dataFile) }));
+  app.post("/api/system/save", async () => {
+    manager.checkpoint();
+    const database = manager.integrityCheck();
+    if (database !== "ok") throw new Error("数据库完整性检查失败");
+    return { data: { savedAt: new Date().toISOString(), database, dataFile: paths.dataFile } };
+  });
   app.post("/api/system/open-data-directory", async () => {
     openPath(paths.root);
     return { data: { opened: true, path: paths.root } };

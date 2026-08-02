@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CalendarPlus, Check, Clock, DotsThree, ArrowBendDownRight, Trash, Play, X, ArrowSquareOut } from "@phosphor-icons/react";
 import { api } from "../api";
@@ -16,7 +16,7 @@ const fields: FieldDefinition[] = [
 ];
 
 export function TodayPage() {
-  const { data, run } = useWorkspace();
+  const { data, registerSaveHandler, run } = useWorkspace();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [view, setView] = useState<"today" | "week" | "history">("today");
@@ -24,11 +24,26 @@ export function TodayPage() {
   const [editing, setEditing] = useState<Record<string, any> | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [review, setReview] = useState("");
+  const [savedReview, setSavedReview] = useState("");
   const newOpen = params.get("new") === "1";
   const openForm = (item: Record<string, any> | null = null) => { setEditing(item ?? {}); if (!item) setParams({ new: "1" }); };
   const closeForm = () => { setEditing(null); setParams({}); };
 
-  useEffect(() => { void api.getReview(selectedDate).then((value) => setReview(value?.content ?? "")); }, [selectedDate]);
+  useEffect(() => {
+    void api.getReview(selectedDate).then((value) => {
+      const content = value?.content ?? "";
+      setReview(content);
+      setSavedReview(content);
+    });
+  }, [selectedDate]);
+
+  const persistReview = useCallback(async () => {
+    if (review === savedReview) return;
+    await run(() => api.setReview(selectedDate, review));
+    setSavedReview(review);
+  }, [review, run, savedReview, selectedDate]);
+
+  useEffect(() => registerSaveHandler(persistReview), [persistReview, registerSaveHandler]);
 
   const items = useMemo(() => {
     if (view === "today") return data.planItems.filter((item) => item.plan_date === selectedDate && item.status !== "cancelled");
@@ -59,7 +74,7 @@ export function TodayPage() {
           <div className="row-menu-wrap"><button className="icon-button" onClick={() => setMenu(menu === item.id ? null : item.id)}><DotsThree size={20} /></button>{menu === item.id ? <div className="row-menu"><button onClick={() => { openForm(item); setMenu(null); }}><Clock size={15} />调整时间</button><button onClick={() => void run(() => api.update("planItems", item.id, { status: "doing" }))}><Play size={15} />开始执行</button><button onClick={() => void run(() => api.postponePlan(item.id, addDays(item.plan_date, 1)))}><ArrowBendDownRight size={15} />移到明天</button><button onClick={() => void run(() => api.update("planItems", item.id, { status: "cancelled" }))}><X size={15} />取消</button><button className="danger" onClick={() => void run(() => api.remove("planItems", item.id))}><Trash size={15} />移到回收站</button></div> : null}</div>
         </div>)}</div> : <EmptyState title="这个时间范围还没有计划" description="添加第一件需要执行的事情。" action={<Button variant="secondary" onClick={() => openForm()}>添加事项</Button>} />}
       </Section>
-      {view === "today" ? <Section title="当日复盘" description="一句话记录今天做得如何"><textarea className="review-input" value={review} onChange={(event) => setReview(event.target.value)} onBlur={() => void run(() => api.setReview(selectedDate, review))} placeholder="今天最值得记住的进展、问题或调整……" /></Section> : null}
+      {view === "today" ? <Section title="当日复盘" description="一句话记录今天做得如何"><textarea className="review-input" value={review} onChange={(event) => setReview(event.target.value)} onBlur={() => void persistReview().catch(() => undefined)} placeholder="今天最值得记住的进展、问题或调整……" /></Section> : null}
       <Modal open={newOpen || editing !== null} title={editing?.id ? "编辑计划事项" : "添加计划事项"} description="时间可以暂时留空，之后再安排。" onClose={closeForm}>
         <EntityForm fields={fields} initial={{ plan_date: selectedDate, priority: "medium", ...editing }} onCancel={closeForm} onSubmit={async (values) => { if (editing?.id) await run(() => api.update("planItems", editing.id, values)); else await run(() => api.create("planItems", values)); closeForm(); }} />
       </Modal>
