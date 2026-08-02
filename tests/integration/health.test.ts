@@ -16,7 +16,7 @@ describe("application health", () => {
       expect(address && typeof address === "object" ? address.address : "").toBe("127.0.0.1");
       const response = await app.inject({ method: "GET", url: "/api/health" });
       expect(response.statusCode).toBe(200);
-      expect(response.json().data).toMatchObject({ status: "ok", database: "ok", schemaVersion: "001_initial.sql" });
+      expect(response.json().data).toMatchObject({ status: "ok", database: "ok", schemaVersion: "002_workout_body_part.sql" });
     } finally {
       await app.close();
     }
