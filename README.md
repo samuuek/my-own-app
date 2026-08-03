@@ -1,6 +1,6 @@
-# 木子工作台
+# My Own App
 
-木子工作台是一款只在自己电脑上运行的工作与生活管理应用。它把计划、创作、开发、咨询、健身、饮食和娱乐放进同一个本地控制中心，不需要注册账号，也不依赖云数据库。
+My Own App 是木子工作台的开源项目：一款只在自己电脑上运行的工作与生活管理应用。它把计划、创作、开发、咨询、健身、饮食和娱乐放进同一个本地控制中心，不需要注册账号，也不依赖云数据库。
 
 应用默认只监听本机地址 `127.0.0.1`。业务数据保存在独立的 SQLite 文件中，刷新页面、关闭浏览器或重新启动电脑后都不会丢失。
 
@@ -67,8 +67,8 @@ npm --version
 可以克隆仓库：
 
 ```bash
-git clone https://github.com/TianyiDataScience/muzi-workspace.git
-cd muzi-workspace
+git clone https://github.com/TianyiDataScience/my-own-app.git
+cd my-own-app
 ```
 
 也可以在 GitHub 仓库页面选择“代码 → 下载 ZIP”，解压后进入项目目录。
