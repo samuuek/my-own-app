@@ -3,6 +3,9 @@ import { chromium, defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // 完整验收包含多尺寸截图、三套外观与九个页面；共享 CI runner 的冷启动
+  // 明显慢于本机。断言和页面覆盖保持不变，仅给每个完整用例足够执行时间。
+  timeout: 120_000,
   fullyParallel: false,
   workers: 1,
   retries: 0,
