@@ -5,6 +5,7 @@ import { api } from "../api";
 import { useWorkspace } from "../WorkspaceContext";
 import { formatDate, formatDateTime, formatDuration, localDate } from "../utils";
 import { Button, ConfirmDialog, EmptyState, EntityForm, Modal, PageHeader, Section, type FieldDefinition } from "../components/ui";
+import { ModuleArtwork } from "../components/ModuleArtwork";
 
 export function ConsultingPage() {
   const { data, run } = useWorkspace();
@@ -28,7 +29,7 @@ export function ConsultingPage() {
   const totalFee = timeEntries.reduce((sum, item) => sum + Number(item.fee_cents || 0), 0) / 100;
   return (
     <div>
-      <PageHeader eyebrow="客户与交付" title="咨询工作" description="围绕客户、项目、沟通、交付和跟进组织咨询过程。" actions={<><Button variant="secondary" onClick={() => setDialog({ type: "client" })}><Users size={17} />添加客户</Button>{clientId ? <Button onClick={() => setDialog({ type: "project" })}><Plus size={17} />新建咨询项目</Button> : null}{client ? <Button variant="ghost" className="danger-text" onClick={() => setDeleteClientOpen(true)}><Trash size={16} />删除客户</Button> : null}</>} />
+      <PageHeader icon={<ModuleArtwork module="consulting" />} eyebrow="客户与交付" title="咨询工作" description="围绕客户、项目、沟通、交付和跟进组织咨询过程。" actions={<><Button variant="secondary" onClick={() => setDialog({ type: "client" })}><Users size={17} />添加客户</Button>{clientId ? <Button onClick={() => setDialog({ type: "project" })}><Plus size={17} />新建咨询项目</Button> : null}{client ? <Button variant="ghost" className="danger-text" onClick={() => setDeleteClientOpen(true)}><Trash size={16} />删除客户</Button> : null}</>} />
       {data.clients.length === 0 ? <EmptyState title="还没有客户记录" description="添加客户后，再创建咨询项目和跟进。" action={<Button onClick={() => setDialog({ type: "client" })}>添加第一个客户</Button>} /> : <div className="consult-layout">
         <aside className="client-column"><span className="rail-label">客户</span>{data.clients.map((client) => <button className={client.id === clientId ? "active" : ""} key={client.id} onClick={() => { setClientId(client.id); setProjectId(null); }}><div className="client-avatar">{client.name.slice(0, 1)}</div><div><strong>{client.name}</strong><small>{data.consultingProjects.filter((item) => item.client_id === client.id && item.status === "active").length} 个进行中项目</small></div></button>)}</aside>
         <div className="consult-main">

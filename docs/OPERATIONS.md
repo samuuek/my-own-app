@@ -1,23 +1,22 @@
 # 运行、备份与恢复手册
 
-## 1. 启动和停止
+## 1. 启动和退出
 
-日常使用时双击根目录的 `启动木子工作台.command`。应用只监听 `127.0.0.1:4317`，同一局域网里的其他设备无法直接访问。重复启动不会创建第二个服务，而是检测健康状态并打开现有地址。
+macOS 双击根目录的 `启动木子工作台.command`，Windows 双击 `启动木子工作台.bat`。应用只监听 `127.0.0.1:4317`，同一局域网里的其他设备无法直接访问。重复启动不会创建第二个服务，而是检测健康状态并打开现有地址。
 
-停止时双击 `停止木子工作台.command`。停止脚本会核对 PID 和项目路径，向应用发送 `SIGTERM`；服务收到信号后关闭 HTTP 服务、执行 SQLite WAL 检查点并关闭数据库。
+退出时点击页面顶部的“保存并退出”。页面会先提交仍在编辑中的自动保存内容，再执行 SQLite WAL 检查点和完整性检查；响应成功后，本地 HTTP 服务和数据库连接会安全关闭。直接关闭浏览器标签页只会关闭界面，服务继续留在后台，下一次启动会复用它。电脑关机时系统会结束服务，已经提交到 SQLite 的数据不会丢失。
 
 终端等价命令：
 
 ```bash
 npm run app:start
-npm run app:stop
 ```
 
 如果开发源代码有变化，先运行 `npm run build`，再重新启动生产服务。
 
 ## 2. 文件位置
 
-默认根目录为 `~/Library/Application Support/MuziWorkspace`：
+macOS 默认根目录为 `~/Library/Application Support/MuziWorkspace`，Windows 默认为 `%LOCALAPPDATA%\MuziWorkspace`：
 
 - `data/app.sqlite`：唯一主数据库。
 - `backups/*.sqlite`：完整、独立、可复制的备份。
@@ -56,7 +55,9 @@ npm run app:stop
 
 ### 页面打不开
 
-先运行 `npm run app:start`，查看终端信息。若失败，检查 `~/Library/Application Support/MuziWorkspace/logs/app.log`。默认端口是 4317；开发端口是 3000。
+先运行 `npm run app:start`，查看终端信息。若失败，macOS 检查 `~/Library/Application Support/MuziWorkspace/logs/app.log`，Windows 检查 `%LOCALAPPDATA%\MuziWorkspace\logs\app.log`。默认端口是 4317；开发页面端口是 3000。
+
+如果系统提示找不到 `node` 或 `npm`，请安装 Node.js 22.13.0 或更高版本并重新打开终端。第一次从源代码运行还需要在项目目录执行一次 `npm install`。
 
 ### 显示数据文件只读或保存失败
 
@@ -68,4 +69,4 @@ npm run app:stop
 
 ### 手动迁移到同一台电脑的其他目录
 
-先安全停止应用，复制整个 `MuziWorkspace` 目录，再通过 `MUZI_DATA_DIR` 指向新目录启动。确认正常后再决定是否保留旧目录。
+先在页面中点击“保存并退出”，复制整个 `MuziWorkspace` 目录，再通过 `MUZI_DATA_DIR` 指向新目录启动。确认正常后再决定是否保留旧目录。

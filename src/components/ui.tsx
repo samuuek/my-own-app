@@ -197,11 +197,15 @@ export function ConfirmDialog({ open, title, description, confirmLabel = "确认
   );
 }
 
-export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description: string; actions?: ReactNode }) {
+export function PageHeader({ eyebrow, title, description, icon, actions }: { eyebrow?: string; title: string; description: string; icon?: ReactNode; actions?: ReactNode }) {
   return (
     <header className="page-header">
-      <div>{eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}<h1>{title}</h1><p>{description}</p></div>
+      <div className="page-heading">
+        {icon ? <span className="page-header-icon" aria-hidden="true">{icon}</span> : null}
+        <div className="page-heading-copy">{eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}<h1>{title}</h1><p>{description}</p></div>
+      </div>
       {actions ? <div className="page-actions">{actions}</div> : null}
+      <span className="page-header-sticker" aria-hidden="true" />
     </header>
   );
 }

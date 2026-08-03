@@ -6,6 +6,7 @@ import { useWorkspace } from "../WorkspaceContext";
 import { MonthCalendar } from "../components/MonthCalendar";
 import { addDays, localDate } from "../utils";
 import { Badge, Button, EmptyState, EntityForm, Modal, PageHeader, Section, type FieldDefinition } from "../components/ui";
+import { ModuleArtwork } from "../components/ModuleArtwork";
 
 const mealTypes = [{ value: "breakfast", label: "早餐" }, { value: "lunch", label: "午餐" }, { value: "dinner", label: "晚餐" }, { value: "snack", label: "加餐" }];
 
@@ -27,7 +28,7 @@ export function DietPage() {
   };
   return (
     <div>
-      <PageHeader eyebrow="计划与实际摄入" title="饮食计划" description="先决定吃什么，再记录实际摄入；未知营养数据可以留空。" actions={<><Button variant="secondary" onClick={() => setDialog({ type: "food" })}><Plus size={16} />常用食物</Button><Button onClick={() => setDialog({ type: "meal" })}><ForkKnife size={17} />记录餐食</Button></>} />
+      <PageHeader icon={<ModuleArtwork module="diet" />} eyebrow="计划与实际摄入" title="饮食计划" description="先决定吃什么，再记录实际摄入；未知营养数据可以留空。" actions={<><Button variant="secondary" onClick={() => setDialog({ type: "food" })}><Plus size={16} />常用食物</Button><Button onClick={() => setDialog({ type: "meal" })}><ForkKnife size={17} />记录餐食</Button></>} />
       <div className="diet-toolbar"><label className="date-control"><CalendarBlank size={16} /><input type="date" value={date} onChange={(event) => { setDate(event.target.value); setCalendarMonth(event.target.value.slice(0, 7)); }} /></label><Button variant="ghost" size="sm" onClick={() => void copyYesterday()}><Copy size={15} />复制昨天的计划</Button><Button variant="ghost" size="sm" onClick={() => setDialog({ type: "target" })}><Target size={15} />设置营养目标</Button></div>
       <Section title="饮食日历" description="按天查看计划餐食、实际摄入和已记录热量">
         <MonthCalendar month={calendarMonth} selectedDate={date} onMonthChange={setCalendarMonth} onSelectDate={(value) => { setDate(value); setCalendarMonth(value.slice(0, 7)); }} renderDay={(value) => <MealCalendarDay date={value} data={data} />} />

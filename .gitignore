@@ -46,3 +46,13 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# local application data
+/MuziWorkspace/
+/data/
+/backups/
+/exports/
+/logs/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Check, Clock, ArrowRight, NotePencil, CalendarBlank, Plus, Broadcast, Code, ChatCenteredText, Barbell, BowlFood, GameController, ListPlus, Bug, ForkKnife } from "@phosphor-icons/react";
+import { Check, Clock, ArrowRight, NotePencil, CalendarBlank, Plus, Barbell, ListPlus, Bug, ForkKnife } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useWorkspace } from "../WorkspaceContext";
 import { localDate, formatDuration, formatDate, classNames } from "../utils";
 import { Badge, Button, EmptyState, ErrorState, PageHeader, Section, Skeleton } from "../components/ui";
+import { ModuleArtwork, type ModuleArtworkName } from "../components/ModuleArtwork";
 
-const summaryMeta: Record<string, { title: string; route: string; icon: typeof Broadcast; empty: string }> = {
-  media: { title: "自媒体", route: "/media", icon: Broadcast, empty: "暂无待发布内容" },
-  development: { title: "开发工作", route: "/development", icon: Code, empty: "暂无高优先级问题" },
-  consulting: { title: "咨询工作", route: "/consulting", icon: ChatCenteredText, empty: "暂无待跟进事项" },
-  fitness: { title: "健身计划", route: "/fitness", icon: Barbell, empty: "暂无近期训练" },
-  diet: { title: "饮食计划", route: "/diet", icon: BowlFood, empty: "今天还没有餐食记录" },
-  entertainment: { title: "游戏娱乐", route: "/entertainment", icon: GameController, empty: "暂无正在进行的游戏" },
+const summaryMeta: Record<string, { title: string; route: string; module: ModuleArtworkName; empty: string }> = {
+  media: { title: "自媒体", route: "/media", module: "media", empty: "暂无待发布内容" },
+  development: { title: "开发工作", route: "/development", module: "development", empty: "暂无高优先级问题" },
+  consulting: { title: "咨询工作", route: "/consulting", module: "consulting", empty: "暂无待跟进事项" },
+  fitness: { title: "健身计划", route: "/fitness", module: "fitness", empty: "暂无近期训练" },
+  diet: { title: "饮食计划", route: "/diet", module: "diet", empty: "今天还没有餐食记录" },
+  entertainment: { title: "游戏娱乐", route: "/entertainment", module: "entertainment", empty: "暂无正在进行的游戏" },
 };
 
 export function DashboardPage() {
@@ -56,12 +57,12 @@ export function DashboardPage() {
 
   useEffect(() => registerSaveHandler(persistMemo), [persistMemo, registerSaveHandler]);
 
-  if (dashboard.isLoading) return <><PageHeader eyebrow="今天" title="正在整理你的工作台" description="读取今天的计划和各模块状态" /><Skeleton lines={8} /></>;
+  if (dashboard.isLoading) return <><PageHeader icon={<ModuleArtwork module="dashboard" />} eyebrow="今天" title="正在整理你的工作台" description="读取今天的计划和各模块状态" /><Skeleton lines={8} /></>;
   if (dashboard.error || !dashboard.data) return <ErrorState message={(dashboard.error as Error)?.message ?? "首页数据不可用"} onRetry={() => dashboard.refetch()} />;
   const value = dashboard.data;
   return (
     <div className="dashboard-page">
-      <PageHeader eyebrow={new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date())} title={`${new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date())}，从重点开始`} description="今天的行动、提醒和工作生活状态都在这里。" actions={<Button onClick={() => navigate("/today?new=1")}><Plus size={17} />添加今日事项</Button>} />
+      <PageHeader icon={<ModuleArtwork module="dashboard" />} eyebrow={new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date())} title={`${new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date())}，从重点开始`} description="今天的行动、提醒和工作生活状态都在这里。" actions={<Button onClick={() => navigate("/today?new=1")}><Plus size={17} />添加今日事项</Button>} />
       <div className="overview-strip">
         <div><span>今日进度</span><strong>{value.overview.progress}<small>%</small></strong></div>
         <div className="progress-track"><span style={{ width: `${value.overview.progress}%` }} /></div>
@@ -97,8 +98,8 @@ export function DashboardPage() {
       </div>
       <Section title="各模块摘要" description="只展示近期真正需要留意的内容">
         <div className="summary-grid">{Object.entries(summaryMeta).filter(([key]) => !Array.isArray(data.settings.dashboardModules) || data.settings.dashboardModules.includes(key)).map(([key, meta]) => {
-          const Icon = meta.icon; const items = value.summaries[key] ?? [];
-          return <button className="summary-tile" key={key} onClick={() => navigate(meta.route)}><div className="summary-top"><Icon size={20} /><span>{meta.title}</span><ArrowRight size={16} /></div>{items.length ? <><strong>{items[0].title || items[0].name || items[0].content}</strong><small>{items.length > 1 ? `另外还有 ${items.length - 1} 项` : "查看详情"}</small></> : <small>{meta.empty}</small>}</button>;
+          const items = value.summaries[key] ?? [];
+          return <button className="summary-tile" data-module={key} key={key} onClick={() => navigate(meta.route)}><div className="summary-top"><ModuleArtwork module={meta.module} loading="lazy" /><span>{meta.title}</span><ArrowRight size={16} /></div>{items.length ? <><strong>{items[0].title || items[0].name || items[0].content}</strong><small>{items.length > 1 ? `另外还有 ${items.length - 1} 项` : "查看详情"}</small></> : <small>{meta.empty}</small>}</button>;
         })}</div>
       </Section>
     </div>

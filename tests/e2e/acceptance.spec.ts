@@ -15,6 +15,7 @@ test("opens locally, uses no external runtime resources, and reaches all nine pa
     if (!["127.0.0.1", "localhost"].includes(url.hostname)) externalRequests.push(request.url());
   });
   await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("data-appearance", "liquid");
   await expect(page.getByRole("heading", { name: /从重点开始/ })).toBeVisible();
   const destinations = [
     ["首页总览", /从重点开始/], ["今日计划", "今日计划"], ["自媒体", "自媒体"], ["开发工作", "开发工作"],
@@ -28,6 +29,18 @@ test("opens locally, uses no external runtime resources, and reaches all nine pa
   await page.locator(".summary-tile").filter({ hasText: "自媒体" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "自媒体" })).toBeVisible();
   expect(externalRequests).toEqual([]);
+});
+
+test("closing the browser page leaves the local service available for reuse", async ({ browser, request }) => {
+  const context = await browser.newContext();
+  const disposablePage = await context.newPage();
+  await disposablePage.goto("/");
+  await expect(disposablePage.locator(".app-shell")).toBeVisible();
+  await disposablePage.close();
+  await context.close();
+  const health = await request.get("/api/health");
+  expect(health.ok()).toBeTruthy();
+  expect((await health.json()).data.status).toBe("ok");
 });
 
 test("keeps the Liquid Glass shell readable at both target desktop sizes", async ({ page }) => {
@@ -53,9 +66,8 @@ test("keeps the Liquid Glass shell readable at both target desktop sizes", async
     });
     expect(topbarMaterial).toContain("blur");
 
-    // 材质层级：vibrancy 属于控件层（工具栏、浮层），内容层只是半透明表面。
-    // 内容层背后只有平滑的环境层，对它做模糊在像素上等于没做（实测最大差 2/255），
-    // 却要为超过一个视口的面积持续重绘——所以这里断言它「不该」有模糊。
+    // 内容层使用更轻的磨砂，工具栏使用更强的通透模糊；二者都要有真实材质，
+    // 但不能把高密度内容做成和控制层一样轻飘。
     await page.locator(".dashboard-primary .section").first().waitFor();
     const surfaces = await page.evaluate(() => {
       const read = (selector: string) => {
@@ -70,8 +82,20 @@ test("keeps the Liquid Glass shell readable at both target desktop sizes", async
     expect(surfaces.content).not.toBeNull();
     expect(surfaces.content!.alpha).toBeGreaterThan(0.4);
     expect(surfaces.content!.alpha).toBeLessThan(1);
-    expect(surfaces.content!.backdrop).toBe("none");
+    expect(surfaces.content!.backdrop).toContain("blur");
     expect(surfaces.chrome!.backdrop).toContain("blur");
+
+    const shellGeometry = await page.evaluate(() => {
+      const read = (selector: string) => {
+        const style = getComputedStyle(document.querySelector(selector)!);
+        return { radius: Number.parseFloat(style.borderTopLeftRadius), border: Number.parseFloat(style.borderTopWidth) };
+      };
+      return { sidebar: read(".sidebar"), topbar: read(".topbar") };
+    });
+    expect(shellGeometry.sidebar.radius).toBeGreaterThanOrEqual(20);
+    expect(shellGeometry.topbar.radius).toBeGreaterThanOrEqual(20);
+    expect(shellGeometry.sidebar.border).toBeGreaterThanOrEqual(1);
+    expect(shellGeometry.topbar.border).toBeGreaterThanOrEqual(1);
 
     // 环境层必须真的会动，否则控件层的模糊没有可折射的对象。
     const parallax = await page.evaluate(async () => {
@@ -84,6 +108,217 @@ test("keeps the Liquid Glass shell readable at both target desktop sizes", async
       return { atTop, scrolled };
     });
     expect(parallax.scrolled).not.toBe(parallax.atTop);
+  }
+});
+
+test("keeps one animated multicolor environment across modules without leaving the local app", async ({ page }) => {
+  const externalRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (!["127.0.0.1", "localhost"].includes(url.hostname)) externalRequests.push(request.url());
+  });
+  await page.goto("/development");
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-ambient", "chromatic");
+  await expect(page.locator(".ambient-scene-chromatic.is-current")).toHaveCount(1);
+  await page.getByRole("link", { name: "自媒体" }).click();
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-ambient", "chromatic");
+  await expect(page.locator(".ambient-scene-chromatic.is-current")).toHaveCount(1);
+  await expect(page.locator(".ambient-environment__image.is-previous")).toHaveCount(0);
+  const materials = await page.locator(".ambient-environment__image.is-current").evaluate((element) => getComputedStyle(element).backgroundImage);
+  expect(materials).toContain("chromatic-polymer-light-v1.webp");
+  const backgroundMotion = await page.locator(".ambient-environment__image.is-current").evaluate((element) => getComputedStyle(element, "::before").animationName);
+  expect(backgroundMotion).toContain("ambient-drift");
+  const glassEdge = await page.locator(".topbar").evaluate((element) => getComputedStyle(element).backgroundImage);
+  expect(glassEdge.match(/linear-gradient/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+  expect(externalRequests).toEqual([]);
+});
+
+test("uses a distinct local AI-generated icon for every module in one consistent visual system", async ({ page }) => {
+  await page.goto("/");
+  const brandIcon = page.locator(".brand-mark img");
+  await expect(brandIcon).toBeVisible();
+  await expect(page.locator(".brand-mark")).not.toContainText("木");
+  const brandState = await brandIcon.evaluate((icon) => ({
+    source: (icon as HTMLImageElement).getAttribute("src"),
+    loaded: (icon as HTMLImageElement).complete && (icon as HTMLImageElement).naturalWidth >= 64,
+  }));
+  expect(brandState.source).toBe("/assets/brand/muzi-mark.svg");
+  expect(brandState.loaded).toBeTruthy();
+  await expect(page.locator(".page-header-icon .module-artwork")).toBeVisible();
+  await expect(page.locator(".toolbar-page-icon .module-artwork")).toBeVisible();
+  const navigationIcons = page.locator(".nav-link > .module-artwork");
+  await expect(navigationIcons).toHaveCount(9);
+  const iconState = await navigationIcons.evaluateAll((icons) => ({
+    sources: icons.map((icon) => (icon as HTMLImageElement).getAttribute("src")),
+    allLoaded: icons.every((icon) => (icon as HTMLImageElement).complete && (icon as HTMLImageElement).naturalWidth >= 500),
+    radii: icons.map((icon) => Number.parseFloat(getComputedStyle(icon).borderTopLeftRadius)),
+  }));
+  expect(new Set(iconState.sources).size).toBe(9);
+  expect(iconState.sources.every((source) => source?.startsWith("/assets/module-icons/") && source.endsWith("-v1.webp"))).toBeTruthy();
+  expect(iconState.allLoaded).toBeTruthy();
+  expect(Math.min(...iconState.radii)).toBeGreaterThanOrEqual(9);
+
+  await page.getByRole("button", { name: "快速新建" }).click();
+  await expect(page.locator(".quick-option-icon")).toHaveCount(6);
+  await expect(page.locator(".quick-option-icon .module-artwork")).toHaveCount(6);
+  const iconRadius = await page.locator(".quick-option-icon").first().evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).borderTopLeftRadius),
+  );
+  expect(iconRadius).toBeGreaterThanOrEqual(10);
+});
+
+test("keeps Neo isolated, multicolor and overflow-free across all pages and target viewports", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const pages = ["/", "/today", "/media", "/development", "/consulting", "/fitness", "/diet", "/entertainment", "/settings"];
+  const viewports = [
+    { width: 1440, height: 900 },
+    { width: 1728, height: 1117 },
+    { width: 390, height: 844 },
+  ];
+
+  try {
+    expect((await request.put("/api/settings", { data: { appearance: "neo", theme: "light" } })).ok()).toBeTruthy();
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      for (const path of pages) {
+        await page.goto(path);
+        await expect(page.locator("html")).toHaveAttribute("data-appearance", "neo");
+        await expect(page.locator(".app-shell")).toHaveClass(/neo-shell/);
+        await expect(page.locator(".page-header")).toBeVisible();
+        await expect(page.locator(".ambient-environment")).toHaveCount(0);
+        await expect(page.getByRole("link", { name: "数据与设置" })).toBeVisible();
+
+        const layout = await page.evaluate(() => {
+          const shellStyle = getComputedStyle(document.querySelector(".app-shell")!);
+          const headerStyle = getComputedStyle(document.querySelector(".page-header")!, "::after");
+          const activeBlur = [...document.querySelectorAll("body *")].filter((element) => {
+            const value = getComputedStyle(element).backdropFilter;
+            return value && value !== "none";
+          });
+          return {
+            viewportWidth: document.documentElement.clientWidth,
+            pageWidth: document.documentElement.scrollWidth,
+            emblemImage: headerStyle.backgroundImage,
+            blurredElements: activeBlur.length,
+            palette: ["--mix-a", "--mix-b", "--mix-c", "--mix-d", "--mix-e"].map((name) => shellStyle.getPropertyValue(name).trim()),
+          };
+        });
+        expect(layout.pageWidth).toBeLessThanOrEqual(layout.viewportWidth);
+        expect(layout.emblemImage).toContain("module-emblems.png");
+        expect(layout.blurredElements).toBe(0);
+        expect(new Set(layout.palette).size).toBe(5);
+      }
+    }
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/");
+    await expect(page.locator(".neo-nav-emblem")).toHaveCount(9);
+    const emblemState = await page.locator(".neo-nav-emblem").evaluateAll((emblems) => ({
+      allUseSprite: emblems.every((emblem) => getComputedStyle(emblem).backgroundImage.includes("module-emblems.png")),
+      positions: emblems.map((emblem) => getComputedStyle(emblem).backgroundPosition),
+    }));
+    expect(emblemState.allUseSprite).toBe(true);
+    expect(new Set(emblemState.positions).size).toBe(9);
+
+    expect((await request.put("/api/settings", { data: { appearance: "neo", theme: "dark" } })).ok()).toBeTruthy();
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", "neo");
+    const darkSurface = await page.evaluate(() => ({
+      topbarFilter: getComputedStyle(document.querySelector(".topbar")!).backdropFilter,
+      topbarBackground: getComputedStyle(document.querySelector(".topbar")!).backgroundColor,
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
+    }));
+    expect(darkSurface.topbarFilter).toBe("none");
+    expect(darkSurface.topbarBackground).not.toBe("rgba(0, 0, 0, 0)");
+    expect(darkSurface.bodyBackground).not.toBe("rgba(0, 0, 0, 0)");
+  } finally {
+    await request.put("/api/settings", { data: { appearance: "liquid", theme: "light" } });
+  }
+
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("data-appearance", "liquid");
+  await expect(page.locator(".ambient-environment")).toBeVisible();
+  await expect(page.locator(".app-shell")).not.toHaveClass(/neo-shell/);
+  await expect(page.locator(".topbar")).toHaveCSS("backdrop-filter", /blur/);
+});
+
+test("keeps every module's primary business entry and safe-exit control available in all three appearances", async ({ page, request }) => {
+  const routes = [
+    ["/", "添加今日事项"],
+    ["/today", "添加事项"],
+    ["/media", "记录内容"],
+    ["/development", "新建项目"],
+    ["/consulting", "添加客户"],
+    ["/fitness", "新建训练模板"],
+    ["/diet", "记录餐食"],
+    ["/entertainment", "添加游戏或活动"],
+    ["/settings", "立即备份"],
+  ] as const;
+
+  for (const appearance of ["liquid", "notebook", "neo"] as const) {
+    expect((await request.put("/api/settings", { data: { appearance, theme: "light" } })).ok()).toBeTruthy();
+    for (const [path, action] of routes) {
+      await page.goto(path);
+      await expect(page.locator("html")).toHaveAttribute("data-appearance", appearance);
+      await expect(page.getByRole("button", { name: action, exact: true }).first()).toBeVisible();
+      await expect(page.getByRole("button", { name: "保存并退出", exact: true })).toBeVisible();
+    }
+  }
+  await request.put("/api/settings", { data: { appearance: "liquid", theme: "light" } });
+});
+
+test("keeps major panels separated and grid columns aligned in all three appearances", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const spacingClient = await create(request, "clients", { name: "布局间距验收客户" });
+  await create(request, "consultingProjects", { client_id: spacingClient.id, name: "布局间距验收项目", status: "active" });
+  await create(request, "entertainmentItems", { name: "布局间距验收游戏", platform: "本地", status: "playing" });
+
+  const readGridFlow = async (selector: string) => page.locator(selector).evaluate((grid) => {
+    const rect = grid.getBoundingClientRect();
+    const previous = grid.previousElementSibling?.getBoundingClientRect();
+    const next = grid.nextElementSibling?.getBoundingClientRect();
+    const children = Array.from(grid.children).map((child) => child.getBoundingClientRect());
+    return {
+      before: previous ? Math.round(rect.top - previous.bottom) : null,
+      after: next ? Math.round(next.top - rect.bottom) : null,
+      firstRowTopDelta: children.length > 1 ? Math.round(children[1].top - children[0].top) : 0,
+    };
+  });
+
+  try {
+    for (const appearance of ["liquid", "notebook", "neo"] as const) {
+      expect((await request.put("/api/settings", { data: { appearance, theme: "light" } })).ok()).toBeTruthy();
+
+      await page.goto("/settings");
+      const settings = await readGridFlow(".settings-grid");
+      expect(settings.before).toBeGreaterThanOrEqual(12);
+      expect(settings.after).toBeGreaterThanOrEqual(12);
+      expect(Math.abs(settings.firstRowTopDelta)).toBeLessThanOrEqual(1);
+
+      await page.goto("/fitness");
+      const fitness = await readGridFlow(".fitness-grid");
+      expect(fitness.before).toBeGreaterThanOrEqual(12);
+      expect(fitness.after).toBeGreaterThanOrEqual(12);
+      expect(Math.abs(fitness.firstRowTopDelta)).toBeLessThanOrEqual(1);
+
+      await page.goto("/diet");
+      const nutrition = await readGridFlow(".nutrition-strip");
+      const meals = await readGridFlow(".meal-columns");
+      expect(nutrition.before).toBeGreaterThanOrEqual(12);
+      expect(meals.after).toBeGreaterThanOrEqual(12);
+
+      await page.goto("/entertainment");
+      const games = await readGridFlow(".game-grid");
+      expect(games.after).toBeGreaterThanOrEqual(12);
+
+      await page.goto("/consulting");
+      const consulting = await readGridFlow(".consult-grid");
+      expect(Math.abs(consulting.firstRowTopDelta)).toBeLessThanOrEqual(1);
+    }
+  } finally {
+    await request.put("/api/settings", { data: { appearance: "liquid", theme: "light" } });
   }
 });
 
@@ -125,10 +360,11 @@ test("keeps row menus above completed rows and opaque enough to read", async ({ 
 });
 
 test("creates, schedules, displays and completes a daily plan item", async ({ page }) => {
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
   await page.goto("/today");
   await page.locator("header").getByRole("button", { name: "添加事项" }).click();
   await page.getByLabel(/事项名称/).fill("浏览器验收任务");
-  await page.getByLabel(/^日期/).fill("2026-08-02");
+  await page.getByLabel(/^日期/).fill(today);
   await page.getByLabel(/开始时间/).fill("10:30");
   await page.getByLabel(/预计分钟/).fill("45");
   await page.getByLabel(/优先级/).selectOption("high");
@@ -171,8 +407,9 @@ test("creates media content and finds it through global search", async ({ page }
 });
 
 test("keeps linked plan titles live and opens the source module", async ({ page, request }) => {
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
   const media = await create(request, "mediaContents", { title: "原始来源标题", stage: "producing" });
-  await create(request, "planItems", { title: "旧的副本标题", plan_date: "2026-08-02", source_module: "media", source_entity_type: "media_content", source_entity_id: media.id });
+  await create(request, "planItems", { title: "旧的副本标题", plan_date: today, source_module: "media", source_entity_type: "media_content", source_entity_id: media.id });
   expect((await request.patch(`/api/collections/mediaContents/${media.id}`, { data: { title: "来源更新后的标题" } })).ok()).toBeTruthy();
   await page.goto("/today");
   const row = page.locator(".plan-table-row").filter({ hasText: "来源更新后的标题" });
@@ -275,7 +512,7 @@ test("renders distinct records in every specialized module", async ({ page, requ
   }
 });
 
-test("restores trash, persists theme, creates backup and downloads export", async ({ page, request }) => {
+test("restores trash, persists appearance and theme, creates backup and downloads export", async ({ page, request }) => {
   const media = await create(request, "mediaContents", { title: "可恢复验收记录", stage: "idea" });
   expect((await request.delete(`/api/collections/mediaContents/${media.id}`)).ok()).toBeTruthy();
   await page.goto("/settings");
@@ -286,11 +523,25 @@ test("restores trash, persists theme, creates backup and downloads export", asyn
   await expect(trashRow).toHaveCount(0);
 
   await page.getByRole("button", { name: "深色" }).click();
+  await page.getByRole("button", { name: "Notion 笔记" }).click();
   await page.getByLabel("自媒体").uncheck();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("html")).toHaveAttribute("data-appearance", "notebook");
+  await expect(page.locator(".notebook-environment")).toBeVisible();
+  await expect(page.locator(".ambient-environment")).toHaveCount(0);
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("html")).toHaveAttribute("data-appearance", "notebook");
   await expect(page.getByLabel("自媒体")).not.toBeChecked();
+
+  await page.getByRole("button", { name: "Neo-Brutalism" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-appearance", "neo");
+  await expect(page.locator(".app-shell")).toHaveClass(/neo-shell/);
+
+  await page.getByRole("button", { name: "Liquid Glass" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-appearance", "liquid");
+  await expect(page.locator(".ambient-environment")).toBeVisible();
+  await expect(page.locator(".topbar")).toHaveCSS("backdrop-filter", /blur/);
 
   await page.getByRole("button", { name: "立即备份" }).click();
   const manualBackup = page.locator(".backup-list article").filter({ hasText: "手动" }).first();

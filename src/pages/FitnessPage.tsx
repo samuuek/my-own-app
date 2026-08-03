@@ -7,6 +7,7 @@ import { useWorkspace } from "../WorkspaceContext";
 import { MonthCalendar } from "../components/MonthCalendar";
 import { formatDate, localDate } from "../utils";
 import { Badge, Button, EmptyState, EntityForm, Modal, PageHeader, Section, type FieldDefinition } from "../components/ui";
+import { ModuleArtwork } from "../components/ModuleArtwork";
 
 export function FitnessPage() {
   const { data, run } = useWorkspace();
@@ -40,7 +41,7 @@ export function FitnessPage() {
   const weightChart = [...data.bodyMetrics].sort((a, b) => a.metric_date.localeCompare(b.metric_date)).slice(-12).map((item) => ({ date: item.metric_date.slice(5), weight: item.weight }));
   return (
     <div>
-      <PageHeader eyebrow="训练与身体数据" title="健身计划" description="用训练模板开始，逐组记录实际完成情况，并保留历史。" actions={<><Button variant="secondary" onClick={() => setDialog({ type: "metric" })}><TrendUp size={17} />记录身体数据</Button><Button onClick={() => setDialog({ type: "template" })}><Plus size={17} />新建训练模板</Button></>} />
+      <PageHeader icon={<ModuleArtwork module="fitness" />} eyebrow="训练与身体数据" title="健身计划" description="用训练模板开始，逐组记录实际完成情况，并保留历史。" actions={<><Button variant="secondary" onClick={() => setDialog({ type: "metric" })}><TrendUp size={17} />记录身体数据</Button><Button onClick={() => setDialog({ type: "template" })}><Plus size={17} />新建训练模板</Button></>} />
       {activeWorkout ? <Section title={`正在训练 · ${activeWorkout.name}`} description={`开始于 ${new Date(activeWorkout.started_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`} action={<Button onClick={() => void run(() => api.update("workouts", activeWorkout.id, { status: "completed", completed_at: new Date().toISOString() }))}><Check size={16} />完成训练</Button>}>
         <div className="active-workout">{activeExercises.map((exercise) => {
           const sets = data.workoutSets.filter((item) => item.workout_exercise_id === exercise.id).sort((a, b) => a.set_number - b.set_number);

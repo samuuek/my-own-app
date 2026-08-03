@@ -50,13 +50,13 @@ describe("search, trash and settings", () => {
     expect(includeDeleted.json().data).toHaveLength(0);
   });
 
-  it("persists theme and calendar preferences across a restart", async () => {
-    const saved = await app.inject({ method: "PUT", url: "/api/settings", payload: { theme: "dark", weekStart: "sunday", dateFormat: "iso", dashboardModules: ["media", "fitness"] } });
-    expect(saved.json().data).toMatchObject({ theme: "dark", weekStart: "sunday", dateFormat: "iso" });
+  it("persists theme, appearance and calendar preferences across a restart", async () => {
+    const saved = await app.inject({ method: "PUT", url: "/api/settings", payload: { theme: "dark", appearance: "neo", weekStart: "sunday", dateFormat: "iso", dashboardModules: ["media", "fitness"] } });
+    expect(saved.json().data).toMatchObject({ theme: "dark", appearance: "neo", weekStart: "sunday", dateFormat: "iso" });
     await app.close();
     app = await buildApp({ dataDir: directory, autoBackup: false });
     const loaded = await app.inject({ method: "GET", url: "/api/settings" });
-    expect(loaded.json().data).toMatchObject({ theme: "dark", weekStart: "sunday", dateFormat: "iso", dashboardModules: ["media", "fitness"] });
+    expect(loaded.json().data).toMatchObject({ theme: "dark", appearance: "neo", weekStart: "sunday", dateFormat: "iso", dashboardModules: ["media", "fitness"] });
   });
 
   it("cascades child records when a deleted aggregate is permanently removed", async () => {

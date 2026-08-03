@@ -5,6 +5,7 @@ import { api } from "../api";
 import { useWorkspace } from "../WorkspaceContext";
 import { formatDate, formatDateTime, formatDuration, localDate } from "../utils";
 import { Badge, Button, EmptyState, EntityForm, Modal, PageHeader, Section, type FieldDefinition } from "../components/ui";
+import { ModuleArtwork } from "../components/ModuleArtwork";
 
 const statusLabels: Record<string, string> = { wishlist: "想玩", playing: "正在进行", paused: "暂停", completed: "已完成" };
 
@@ -22,7 +23,7 @@ export function EntertainmentPage() {
   const stopSession = async (session: Record<string, any>) => { const ended = new Date(); const duration = Math.max(1, Math.round((ended.getTime() - new Date(session.started_at).getTime()) / 60_000)); await run(() => api.update("playSessions", session.id, { ended_at: ended.toISOString(), duration_minutes: duration })); };
   return (
     <div>
-      <PageHeader eyebrow="放松与进度" title="游戏娱乐" description="记录想玩、正在玩和已经完成的内容，不制造工作式逾期压力。" actions={<Button onClick={() => setDialog({ type: "item" })}><Plus size={17} />添加游戏或活动</Button>} />
+      <PageHeader icon={<ModuleArtwork module="entertainment" />} eyebrow="放松与进度" title="游戏娱乐" description="记录想玩、正在玩和已经完成的内容，不制造工作式逾期压力。" actions={<Button onClick={() => setDialog({ type: "item" })}><Plus size={17} />添加游戏或活动</Button>} />
       {activeSessions.length ? <div className="now-playing">{activeSessions.map((session) => { const item = data.entertainmentItems.find((value) => value.id === session.entertainment_id); return <div key={session.id}><span className="live-dot" /><div><small>正在进行</small><strong>{item?.name || "娱乐活动"}</strong><span>开始于 {formatDateTime(session.started_at)}</span></div><Button variant="secondary" onClick={() => void stopSession(session)}><Stop size={16} />结束并记录</Button></div>; })}</div> : null}
       <div className="entertainment-toolbar"><div className="segmented">{["playing", "wishlist", "paused", "completed", "all"].map((value) => <button className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)}>{value === "all" ? "全部" : statusLabels[value]}</button>)}</div></div>
       {items.length ? <div className="game-grid">{items.map((item) => {

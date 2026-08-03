@@ -10,6 +10,7 @@ import { AppStore, NotFoundError, ValidationError } from "./store.js";
 import { BackupManager } from "./backup.js";
 import { buildDashboard } from "./dashboard.js";
 import { collectionDefinitions, isCollectionName, sourceCollectionByType } from "./collections.js";
+import { openPathCommand } from "./platform.js";
 
 const bodySchema = z.record(z.string(), z.unknown());
 
@@ -18,6 +19,7 @@ export type BuildAppOptions = {
   logger?: boolean;
   serveStatic?: boolean;
   autoBackup?: boolean;
+  requestShutdown?: (reason: "user-exit") => void;
 };
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -48,6 +50,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   app.get("/api/health", async () => ({
     data: {
+      application: "muzi-workspace",
+      buildId: process.env.MUZI_BUILD_ID ?? "development",
+      instanceId: process.env.MUZI_INSTANCE_ID ?? null,
       status: "ok",
       database: manager.integrityCheck(),
       schemaVersion: latestSchemaVersion(manager),
@@ -163,11 +168,24 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   app.get("/api/system/status", async () => ({ data: systemStatus(paths, backups) }));
   app.get("/api/system/data-file", async () => ({ data: fileInfo(paths.dataFile) }));
-  app.post("/api/system/save", async () => {
+  const saveDataFile = () => {
     manager.checkpoint();
     const database = manager.integrityCheck();
     if (database !== "ok") throw new Error("数据库完整性检查失败");
-    return { data: { savedAt: new Date().toISOString(), database, dataFile: paths.dataFile } };
+    return { savedAt: new Date().toISOString(), database, dataFile: paths.dataFile };
+  };
+  app.post("/api/system/save", async () => {
+    return { data: saveDataFile() };
+  });
+  app.post("/api/system/save-and-exit", async (_request, reply) => {
+    const saved = saveDataFile();
+    if (options.requestShutdown) {
+      reply.raw.once("finish", () => {
+        const timer = setTimeout(() => options.requestShutdown?.("user-exit"), 50);
+        timer.unref();
+      });
+    }
+    return reply.send({ data: { ...saved, exiting: Boolean(options.requestShutdown) } });
   });
   app.post("/api/system/open-data-directory", async () => {
     openPath(paths.root);
@@ -213,10 +231,24 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   if (options.serveStatic ?? process.env.NODE_ENV === "production") {
     const root = path.resolve("dist");
-    await app.register(fastifyStatic, { root, wildcard: false });
+    await app.register(fastifyStatic, {
+      root,
+      wildcard: true,
+      setHeaders: (response, filePath) => {
+        response.setHeader(
+          "Cache-Control",
+          filePath.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+        );
+      },
+    });
     app.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith("/api/")) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "接口不存在" } });
-      return reply.sendFile("index.html");
+      // 缺失的构建资源必须返回 404。若退回 index.html，浏览器会把 HTML
+      // 当作 JavaScript/CSS 加载并得到一片白屏。
+      if (request.url.startsWith("/assets/")) {
+        return reply.code(404).send({ error: { code: "ASSET_NOT_FOUND", message: "页面资源不存在，请重新启动木子工作台" } });
+      }
+      return reply.header("Cache-Control", "no-cache").sendFile("index.html");
     });
   }
 
@@ -267,6 +299,7 @@ function systemStatus(paths: AppPaths, backups: BackupManager): Record<string, a
 }
 
 function openPath(target: string): void {
-  const child = spawn("open", [target], { detached: true, stdio: "ignore" });
+  const { command, args } = openPathCommand(target);
+  const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
   child.unref();
 }

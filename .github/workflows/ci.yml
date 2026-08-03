@@ -1,0 +1,52 @@
+name: 双系统持续集成
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-windows:
+    name: ${{ matrix.os }} 构建与本地服务验证
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: 读取源代码
+        uses: actions/checkout@v7
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 运行代码、数据库、构建与启动器验证
+        run: npm run verify
+
+  browser:
+    name: Chromium 端到端验收
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 读取源代码
+        uses: actions/checkout@v7
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 安装 Chromium
+        run: npx playwright install --with-deps chromium
+      - name: 运行端到端验收
+        run: npm run test:e2e

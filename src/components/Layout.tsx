@@ -2,33 +2,35 @@ import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  House, CalendarCheck, Broadcast, Code, ChatCenteredText, Barbell, BowlFood, GameController,
-  Database, MagnifyingGlass, Plus, FloppyDisk, CheckCircle, WarningCircle, SidebarSimple,
-  ArrowRight, Command,
+  MagnifyingGlass, Plus, FloppyDisk, CheckCircle, WarningCircle, SidebarSimple,
+  ArrowRight, Command, Power,
 } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useWorkspace } from "../WorkspaceContext";
 import { formatDateTime, classNames } from "../utils";
+import { normalizeAppearance } from "../appearance";
 import { Button, IconButton, Modal, Skeleton, ErrorState, Badge } from "./ui";
+import { AmbientEnvironment, chooseAmbientScene } from "./AmbientEnvironment";
+import { ModuleArtwork, type ModuleArtworkName } from "./ModuleArtwork";
 import type { Entity } from "../types";
 
 const groups = [
   { label: "日常", links: [
-    { to: "/", label: "首页总览", icon: House },
-    { to: "/today", label: "今日计划", icon: CalendarCheck },
+    { to: "/", label: "首页总览", module: "dashboard", tone: "sky" },
+    { to: "/today", label: "今日计划", module: "today", tone: "cyan" },
   ] },
   { label: "工作", links: [
-    { to: "/media", label: "自媒体", icon: Broadcast },
-    { to: "/development", label: "开发工作", icon: Code },
-    { to: "/consulting", label: "咨询工作", icon: ChatCenteredText },
+    { to: "/media", label: "自媒体", module: "media", tone: "coral" },
+    { to: "/development", label: "开发工作", module: "development", tone: "teal" },
+    { to: "/consulting", label: "咨询工作", module: "consulting", tone: "amber" },
   ] },
   { label: "生活", links: [
-    { to: "/fitness", label: "健身计划", icon: Barbell },
-    { to: "/diet", label: "饮食计划", icon: BowlFood },
-    { to: "/entertainment", label: "游戏娱乐", icon: GameController },
+    { to: "/fitness", label: "健身计划", module: "fitness", tone: "sage" },
+    { to: "/diet", label: "饮食计划", module: "diet", tone: "apricot" },
+    { to: "/entertainment", label: "游戏娱乐", module: "entertainment", tone: "indigo" },
   ] },
-  { label: "系统", links: [{ to: "/settings", label: "数据与设置", icon: Database }] },
-];
+  { label: "系统", links: [{ to: "/settings", label: "数据与设置", module: "settings", tone: "graphite" }] },
+] satisfies Array<{ label: string; links: Array<{ to: string; label: string; module: ModuleArtworkName; tone: string }> }>;
 
 const collectionRoutes: Record<string, string> = {
   planItems: "/today", mediaContents: "/media", devProjects: "/development", devMilestones: "/development",
@@ -39,16 +41,16 @@ const collectionRoutes: Record<string, string> = {
   playSessions: "/entertainment", quickMemos: "/",
 };
 
-const routeMeta: Record<string, { label: string; module: string }> = {
-  "/": { label: "首页总览", module: "dashboard" },
-  "/today": { label: "今日计划", module: "today" },
-  "/media": { label: "自媒体", module: "media" },
-  "/development": { label: "开发工作", module: "development" },
-  "/consulting": { label: "咨询工作", module: "consulting" },
-  "/fitness": { label: "健身计划", module: "fitness" },
-  "/diet": { label: "饮食计划", module: "diet" },
-  "/entertainment": { label: "游戏娱乐", module: "entertainment" },
-  "/settings": { label: "数据与设置", module: "settings" },
+const routeMeta: Record<string, { label: string; module: ModuleArtworkName; tone: string; index: string }> = {
+  "/": { label: "首页总览", module: "dashboard", tone: "sky", index: "00" },
+  "/today": { label: "今日计划", module: "today", tone: "cyan", index: "01" },
+  "/media": { label: "自媒体", module: "media", tone: "coral", index: "02" },
+  "/development": { label: "开发工作", module: "development", tone: "teal", index: "03" },
+  "/consulting": { label: "咨询工作", module: "consulting", tone: "amber", index: "04" },
+  "/fitness": { label: "健身计划", module: "fitness", tone: "sage", index: "05" },
+  "/diet": { label: "饮食计划", module: "diet", tone: "apricot", index: "06" },
+  "/entertainment": { label: "游戏娱乐", module: "entertainment", tone: "indigo", index: "07" },
+  "/settings": { label: "数据与设置", module: "settings", tone: "graphite", index: "08" },
 };
 
 export function AppLayout() {
@@ -57,13 +59,17 @@ export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [exitState, setExitState] = useState<"idle" | "saving" | "done" | "error">("idle");
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus, staleTime: 30_000 });
   const currentPage = routeMeta[location.pathname] ?? routeMeta["/"];
+  const appearance = normalizeAppearance(data.settings.appearance);
+  const theme = data.settings.theme === "dark" ? "dark" : "light";
+  const ambientScene = chooseAmbientScene(currentPage.module, theme);
 
   useEffect(() => {
-    const theme = data.settings.theme ?? "light";
     document.documentElement.dataset.theme = theme;
-  }, [data.settings.theme]);
+    document.documentElement.dataset.appearance = appearance;
+  }, [appearance, theme]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -80,6 +86,10 @@ export function AppLayout() {
   // 只写一个 CSS 变量并由合成层处理，不触发 React 重渲染。
   useEffect(() => {
     const root = document.documentElement;
+    if (appearance !== "liquid") {
+      root.style.removeProperty("--ambient-shift");
+      return;
+    }
     // 视差是纯增强。任何一个依赖的浏览器 API 缺席都必须静默降级，
     // 绝不能让整个应用外壳挂掉。
     if (typeof window.requestAnimationFrame !== "function") return;
@@ -105,22 +115,42 @@ export function AppLayout() {
       motion?.removeEventListener("change", sync);
       window.removeEventListener("scroll", onScroll);
       if (frame) window.cancelAnimationFrame(frame);
+      root.style.removeProperty("--ambient-shift");
     };
-  }, []);
+  }, [appearance]);
+
+  const saveAndExit = async () => {
+    if (exitState === "saving" || exitState === "done") return;
+    setExitState("saving");
+    try {
+      await saveNow();
+      await api.saveAndExit();
+      setExitState("done");
+      document.title = "木子工作台已安全退出";
+    } catch {
+      setExitState("error");
+    }
+  };
 
   return (
-    <div className={classNames("app-shell", collapsed && "sidebar-collapsed")} data-module={currentPage.module}>
+    <div
+      className={classNames("app-shell", appearance === "neo" && "neo-shell", collapsed && "sidebar-collapsed")}
+      data-appearance={appearance}
+      data-module={currentPage.module}
+      data-ambient={ambientScene}
+    >
+      {appearance === "liquid" ? <AmbientEnvironment scene={ambientScene} /> : appearance === "notebook" ? <NotebookEnvironment /> : null}
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <aside className="sidebar glass-regular">
-        <div className="brand"><div className="brand-mark">木</div><div className="brand-copy"><strong>木子工作台</strong><span>本地个人空间</span></div></div>
+        <div className="brand"><div className="brand-mark" aria-hidden="true"><img src={appearance === "neo" ? "/assets/neo/muzi-app-icon-brand.png" : "/assets/brand/muzi-mark.svg"} alt="" draggable={false} /></div><div className="brand-copy"><strong>木子工作台</strong><span>本地个人空间</span></div>{appearance === "neo" ? <span className="brand-edition">NEO / PERSONAL CONTROL DESK</span> : null}</div>
         <Button className="quick-create" onClick={() => setQuickOpen(true)}><Plus size={18} />快速新增</Button>
         <nav aria-label="主导航">
           {groups.map((group) => (
             <div className="nav-group" key={group.label}>
               <span className="nav-label">{group.label}</span>
-              {group.links.map(({ to, label, icon: Icon }) => (
-                <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => classNames("nav-link", isActive && "active")} title={label}>
-                  <Icon size={17} weight="regular" /><span>{label}</span>
+              {group.links.map(({ to, label, module, tone }) => (
+                <NavLink key={to} to={to} end={to === "/"} data-tone={tone} className={({ isActive }) => classNames("nav-link", isActive && "active")} title={label}>
+                  {appearance === "neo" ? <NeoModuleEmblem module={module} /> : <ModuleArtwork module={module} />}<span>{label}</span>
                 </NavLink>
               ))}
             </div>
@@ -134,12 +164,15 @@ export function AppLayout() {
         <header className="topbar glass-clear">
           <div className="topbar-left">
             <IconButton label={collapsed ? "展开导航" : "收起导航"} onClick={() => setCollapsed((value) => !value)}><SidebarSimple size={20} /></IconButton>
+            <span className="toolbar-page-icon" data-tone={currentPage.tone} aria-hidden="true"><ModuleArtwork module={currentPage.module} /></span>
             <div className="toolbar-context"><strong>{currentPage.label}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date())}</span></div>
+            {appearance === "neo" ? <span className="topbar-index">{currentPage.index} / 08</span> : null}
           </div>
           <div className="topbar-actions">
             <button className="search-trigger glass-clear" aria-label="搜索所有内容" title="搜索所有内容" onClick={() => setSearchOpen(true)}><MagnifyingGlass size={18} /><span>搜索所有内容</span><kbd><Command size={12} />K</kbd></button>
             <Button className="topbar-create" variant="secondary" size="sm" onClick={() => setQuickOpen(true)}><Plus size={16} />快速新建</Button>
             <Button className="manual-save" variant="secondary" size="sm" loading={saveStatus === "saving"} onClick={() => void saveNow().catch(() => undefined)}><FloppyDisk size={16} />手动保存</Button>
+            <Button className="save-exit" variant="ghost" size="sm" loading={exitState === "saving"} disabled={exitState === "done"} onClick={() => void saveAndExit()}><Power size={16} />{exitState === "error" ? "退出失败，重试" : "保存并退出"}</Button>
             <SaveIndicator status={saveStatus} />
           </div>
         </header>
@@ -147,8 +180,21 @@ export function AppLayout() {
       </div>
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       <QuickCreateModal open={quickOpen} onClose={() => setQuickOpen(false)} />
+      {exitState === "done" ? <ExitScreen /> : null}
     </div>
   );
+}
+
+function NeoModuleEmblem({ module }: { module: ModuleArtworkName }) {
+  return <span className="neo-nav-emblem" data-module={module} aria-hidden="true" />;
+}
+
+function NotebookEnvironment() {
+  return <div className="notebook-environment" aria-hidden="true" />;
+}
+
+function ExitScreen() {
+  return <div className="exit-screen" role="status"><div className="exit-card"><CheckCircle size={32} weight="fill" /><strong>数据已保存，木子工作台已安全退出</strong><p>现在可以关闭这个页面。下次双击启动图标，会重新启动并打开工作台。</p></div></div>;
 }
 
 function SaveIndicator({ status }: { status: "idle" | "saving" | "saved" | "error" }) {
@@ -191,16 +237,16 @@ function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) 
 function QuickCreateModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
   const options = [
-    { label: "今日事项", detail: "安排今天要执行的事情", route: "/today?new=1", tone: "accent" },
-    { label: "内容灵感", detail: "记录一个自媒体选题", route: "/media?new=1", tone: "neutral" },
-    { label: "开发工作项", detail: "添加功能、需求或 Bug", route: "/development?new=work-item", tone: "neutral" },
-    { label: "咨询跟进", detail: "安排客户后续联系", route: "/consulting?new=followup", tone: "neutral" },
-    { label: "训练记录", detail: "开始或安排一次训练", route: "/fitness?new=workout", tone: "neutral" },
-    { label: "餐食记录", detail: "记录计划或实际饮食", route: "/diet?new=meal", tone: "neutral" },
+    { label: "今日事项", detail: "安排今天要执行的事情", route: "/today?new=1", tone: "cyan", module: "today" },
+    { label: "内容灵感", detail: "记录一个自媒体选题", route: "/media?new=1", tone: "coral", module: "media" },
+    { label: "开发工作项", detail: "添加功能、需求或 Bug", route: "/development?new=work-item", tone: "teal", module: "development" },
+    { label: "咨询跟进", detail: "安排客户后续联系", route: "/consulting?new=followup", tone: "amber", module: "consulting" },
+    { label: "训练记录", detail: "开始或安排一次训练", route: "/fitness?new=workout", tone: "sage", module: "fitness" },
+    { label: "餐食记录", detail: "记录计划或实际饮食", route: "/diet?new=meal", tone: "apricot", module: "diet" },
   ];
   return (
     <Modal open={open} title="快速新增" description="选择要记录的内容类型" onClose={onClose}>
-      <div className="quick-grid">{options.map((option) => <button key={option.label} onClick={() => { navigate(option.route); onClose(); }}><Badge tone={option.tone as any}>{option.label}</Badge><p>{option.detail}</p><ArrowRight size={18} /></button>)}</div>
+      <div className="quick-grid">{options.map((option) => <button data-tone={option.tone} key={option.label} onClick={() => { navigate(option.route); onClose(); }}><span className="quick-option-icon"><ModuleArtwork module={option.module as ModuleArtworkName} /></span><div><Badge>{option.label}</Badge><p>{option.detail}</p></div><ArrowRight size={18} /></button>)}</div>
     </Modal>
   );
 }
