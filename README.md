@@ -24,6 +24,22 @@
 
 外观切换只改变界面，不会复制、迁移或清空业务数据。
 
+## 三种界面风格预览
+
+下面三张截图来自同一个本地工作台、同一份演示数据和相同的 `1440 × 900` 浏览器视口。
+
+### 流光玻璃
+
+![木子工作台流光玻璃界面](docs/screenshots/liquid-glass.png)
+
+### Notion 笔记
+
+![木子工作台 Notion 笔记界面](docs/screenshots/notion-notebook.png)
+
+### Neo-Brutalism
+
+![木子工作台 Neo-Brutalism 界面](docs/screenshots/neo-brutalism.png)
+
 ## 支持的电脑系统
 
 | 系统 | 启动文件 | 默认数据目录 | 打开目录命令 |
