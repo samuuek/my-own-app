@@ -244,6 +244,9 @@ test("keeps Neo isolated, multicolor and overflow-free across all pages and targ
 });
 
 test("keeps every module's primary business entry and safe-exit control available in all three appearances", async ({ page, request }) => {
+  // 该用例要真实访问 3 套外观下的 9 个页面；云端共享 runner 比本机慢，
+  // 保留全部 27 次导航与断言，并为完整验收留出与 Neo 全视口用例相同的时间。
+  test.setTimeout(120_000);
   const routes = [
     ["/", "添加今日事项"],
     ["/today", "添加事项"],
@@ -269,6 +272,8 @@ test("keeps every module's primary business entry and safe-exit control availabl
 });
 
 test("keeps major panels separated and grid columns aligned in all three appearances", async ({ page, request }) => {
+  // 逐套外观检查 5 个高密度页面，不减少覆盖面，只避免云端冷启动误判。
+  test.setTimeout(120_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   const spacingClient = await create(request, "clients", { name: "布局间距验收客户" });
