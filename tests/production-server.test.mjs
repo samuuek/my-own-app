@@ -230,7 +230,9 @@ async function freePort() {
 }
 
 async function waitForHealth(baseUrl, child, getOutput) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  // Windows 托管 runner 首次加载原生 SQLite 模块可能超过 10 秒；仍要求
+  // 同一个真实生产服务成功响应健康检查，只为冷启动保留最多约 30 秒。
+  for (let attempt = 0; attempt < 240; attempt += 1) {
     if (child.exitCode !== null) throw new Error(`生产服务提前退出（${child.exitCode}）：${getOutput()}`);
     try {
       const response = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(500) });
