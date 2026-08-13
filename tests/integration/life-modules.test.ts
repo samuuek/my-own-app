@@ -55,4 +55,60 @@ describe("specialized life modules", () => {
     const dashboard = (await app.inject({ method: "GET", url: "/api/dashboard?date=2026-08-03" })).json().data;
     expect(dashboard.attention.some((item: any) => item.module === "entertainment")).toBe(false);
   });
+
+  it("tracks books, reading progress and multiple page-linked notes", async () => {
+    const book = await create("books", { title: "思考，快与慢", author: "丹尼尔·卡尼曼", status: "reading", total_pages: 500, current_page: 0 });
+    const progress = await app.inject({ method: "POST", url: `/api/books/${book.id}/progress`, payload: { session_date: "2026-08-12", start_page: 1, end_page: 30, duration_minutes: 45, notes: "第一部分" } });
+    expect(progress.statusCode).toBe(201);
+    expect(progress.json().data.book.current_page).toBe(30);
+    expect(progress.json().data.stats).toMatchObject({ pagesRead: 30, minutesRead: 45, completion: 6 });
+    await create("readingNotes", { book_id: book.id, note_date: "2026-08-12", chapter: "系统一", start_page: 12, end_page: 12, excerpt: "直觉快速运作", feeling: "很有共鸣", thinking: "哪些决策依赖直觉？" });
+    await create("readingNotes", { book_id: book.id, note_date: "2026-08-13", chapter: "系统二", start_page: 31, end_page: 35, feeling: "需要慢下来", thinking: "建立检查清单" });
+    const state = (await app.inject({ method: "GET", url: "/api/state" })).json().data;
+    expect(state.readingNotes.filter((item: any) => item.book_id === book.id)).toHaveLength(2);
+
+    const invalid = await app.inject({ method: "POST", url: `/api/books/${book.id}/progress`, payload: { session_date: "2026-08-14", start_page: 31, end_page: 501, duration_minutes: 10 } });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error.message).toContain("当前页不能超过总页数");
+
+    await app.inject({ method: "DELETE", url: `/api/collections/books/${book.id}` });
+    const hidden = (await app.inject({ method: "GET", url: "/api/state" })).json().data;
+    expect(hidden.books).toHaveLength(0);
+    expect(hidden.readingSessions).toHaveLength(0);
+    expect(hidden.readingNotes).toHaveLength(0);
+    await app.inject({ method: "POST", url: `/api/collections/books/${book.id}/restore` });
+    const restored = (await app.inject({ method: "GET", url: "/api/state" })).json().data;
+    expect(restored.readingSessions).toHaveLength(1);
+    expect(restored.readingNotes).toHaveLength(2);
+  });
+
+  it("keeps one daily reflection and adds each tomorrow action to the plan once", async () => {
+    const first = await app.inject({ method: "PUT", url: "/api/reflections/daily", payload: {
+      reflection_date: "2026-08-13", source_category: "work", source_detail: "项目交付",
+      work_summary: "完成阅读模块", life_summary: "晚饭后散步", gains: "先写测试更稳",
+      problems: "低估了文件上传", improvements: "提前列边界",
+      actions: [{ content: "整理发布说明" }, { content: "散步三十分钟" }],
+    } });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().data.actions).toHaveLength(2);
+    const reflectionId = first.json().data.reflection.id;
+
+    const updated = await app.inject({ method: "PUT", url: "/api/reflections/daily", payload: {
+      reflection_date: "2026-08-13", source_category: "life", life_summary: "补充生活总结",
+      actions: [{ id: first.json().data.actions[0].id, content: "整理发布说明" }],
+    } });
+    expect(updated.json().data.reflection.id).toBe(reflectionId);
+    expect(updated.json().data.actions).toHaveLength(1);
+
+    const actionId = updated.json().data.actions[0].id;
+    const plan1 = await app.inject({ method: "POST", url: `/api/reflection-actions/${actionId}/add-to-plan` });
+    const plan2 = await app.inject({ method: "POST", url: `/api/reflection-actions/${actionId}/add-to-plan` });
+    expect(plan1.json().data.id).toBe(plan2.json().data.id);
+    expect(plan1.json().data).toMatchObject({ plan_date: "2026-08-14", source_module: "reflection", source_entity_type: "reflection_action" });
+
+    await create("thoughtNotes", { note_date: "2026-08-13", title: "一个新发现", source_category: "conversation", source_detail: "和朋友聊天", content: "问题问得越具体，复盘越有价值。" });
+    const state = (await app.inject({ method: "GET", url: "/api/state" })).json().data;
+    expect(state.dailyReflections).toHaveLength(1);
+    expect(state.thoughtNotes).toHaveLength(1);
+  });
 });

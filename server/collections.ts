@@ -199,6 +199,54 @@ export const collectionDefinitions = {
     fields: ["entertainment_id", "started_at", "ended_at", "duration_minutes", "progress_note"],
     search: ["progress_note"],
   },
+  books: {
+    table: "books",
+    title: "title",
+    module: "reading",
+    required: ["title"],
+    fields: ["title", "author", "status", "total_pages", "current_page", "rating", "description", "cover_file_id", "cover_filename", "pdf_file_id", "pdf_filename", "last_read_at"],
+    search: ["title", "author", "description"],
+  },
+  readingSessions: {
+    table: "reading_sessions",
+    title: "session_date",
+    module: "reading",
+    required: ["book_id", "session_date", "start_page", "end_page"],
+    fields: ["book_id", "session_date", "start_page", "end_page", "duration_minutes", "notes"],
+    search: ["notes"],
+  },
+  readingNotes: {
+    table: "reading_notes",
+    title: "chapter",
+    module: "reading",
+    required: ["book_id", "note_date"],
+    fields: ["book_id", "note_date", "chapter", "start_page", "end_page", "excerpt", "feeling", "thinking"],
+    search: ["chapter", "excerpt", "feeling", "thinking"],
+  },
+  dailyReflections: {
+    table: "daily_reflections",
+    title: "reflection_date",
+    module: "reflection",
+    required: ["reflection_date", "source_category"],
+    fields: ["reflection_date", "source_category", "source_detail", "work_summary", "life_summary", "gains", "problems", "improvements"],
+    search: ["source_detail", "work_summary", "life_summary", "gains", "problems", "improvements"],
+  },
+  reflectionActions: {
+    table: "reflection_actions",
+    title: "content",
+    module: "reflection",
+    required: ["reflection_id", "content"],
+    fields: ["reflection_id", "content", "sort_order", "plan_item_id"],
+    search: ["content"],
+  },
+  thoughtNotes: {
+    table: "thought_notes",
+    title: "title",
+    module: "reflection",
+    required: ["note_date", "title", "source_category", "content"],
+    fields: ["note_date", "title", "source_category", "source_detail", "content"],
+    search: ["title", "source_detail", "content"],
+  },
 } as const;
 
 export type CollectionName = keyof typeof collectionDefinitions;
@@ -215,4 +263,6 @@ export const sourceCollectionByType: Record<string, CollectionName> = {
   workout: "workouts",
   meal: "meals",
   entertainment_item: "entertainmentItems",
+  book: "books",
+  reflection_action: "reflectionActions",
 };

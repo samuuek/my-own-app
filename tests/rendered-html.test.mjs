@@ -9,7 +9,7 @@ test("production HTML contains the local app entry point and no remote runtime a
     .filter((file) => file.endsWith(".css"))
     .map((file) => fs.readFileSync(new URL(file, assetsDirectory), "utf8"))
     .join("\n");
-  assert.match(html, /<title>木子工作台<\/title>/);
+  assert.match(html, /<title>samuel的工作台<\/title>/);
   assert.match(html, /<div id="root"><\/div>/);
   assert.match(html, /\/assets\/neo\/muzi-app-icon-favicon\.png/);
   assert.doesNotMatch(html, /https?:\/\/(fonts|cdn|unpkg|jsdelivr)\./i);

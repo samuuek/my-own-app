@@ -35,6 +35,16 @@ export const api = {
   permanentDelete: (collection: CollectionName, id: string) =>
     request<void>(`/api/collections/${collection}/${id}/permanent`, { method: "DELETE" }),
   completePlan: (id: string) => request<Entity>(`/api/plan-items/${id}/complete`, { method: "POST" }),
+  recordReadingProgress: (id: string, input: Record<string, any>) =>
+    request<{ book: Entity; session: Entity; stats: Record<string, any>; suggestCompletion: boolean }>(`/api/books/${id}/progress`, { method: "POST", body: JSON.stringify(input) }),
+  saveDailyReflection: (input: Record<string, any>) =>
+    request<{ reflection: Entity; actions: Entity[] }>("/api/reflections/daily", { method: "PUT", body: JSON.stringify(input) }),
+  addReflectionActionToPlan: (id: string) =>
+    request<Entity>(`/api/reflection-actions/${id}/add-to-plan`, { method: "POST" }),
+  uploadBookPdf: (id: string, file: File) => request<Entity>(`/api/books/${id}/pdf`, { method: "PUT", headers: { "Content-Type": "application/pdf", "X-File-Name": file.name }, body: file }),
+  removeBookPdf: (id: string) => request<Entity>(`/api/books/${id}/pdf`, { method: "DELETE" }),
+  uploadBookCover: (id: string, file: File) => request<Entity>(`/api/books/${id}/cover`, { method: "PUT", headers: { "Content-Type": file.type, "X-File-Name": file.name }, body: file }),
+  removeBookCover: (id: string) => request<Entity>(`/api/books/${id}/cover`, { method: "DELETE" }),
   postponePlan: (id: string, date: string) =>
     request<Entity>(`/api/plan-items/${id}/postpone`, { method: "POST", body: JSON.stringify({ date }) }),
   getReview: (date: string) => request<Entity | null>(`/api/daily-reviews/${date}`),

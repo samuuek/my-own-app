@@ -21,7 +21,8 @@ const emptyState: WorkspaceState = {
   planItems: [], quickMemos: [], mediaContents: [], devProjects: [], devMilestones: [], devWorkItems: [], devLogs: [],
   clients: [], consultingProjects: [], consultingInteractions: [], consultingDeliverables: [], consultingFollowups: [], consultingTimeEntries: [],
   workoutTemplates: [], workoutTemplateExercises: [], workouts: [], workoutExercises: [], workoutSets: [], bodyMetrics: [], nutritionTargets: [],
-  foods: [], meals: [], mealItems: [], entertainmentItems: [], playSessions: [], settings: {}, trash: [],
+  foods: [], meals: [], mealItems: [], entertainmentItems: [], playSessions: [], books: [], readingSessions: [], readingNotes: [],
+  dailyReflections: [], reflectionActions: [], thoughtNotes: [], settings: {}, trash: [],
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);

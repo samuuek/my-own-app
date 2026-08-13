@@ -11,6 +11,7 @@ import { BackupManager } from "./backup.js";
 import { buildDashboard } from "./dashboard.js";
 import { collectionDefinitions, isCollectionName, sourceCollectionByType } from "./collections.js";
 import { openPathCommand } from "./platform.js";
+import { ReadingFileManager } from "./reading-files.js";
 
 const bodySchema = z.record(z.string(), z.unknown());
 
@@ -27,7 +28,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const manager = new DatabaseManager(paths);
   const store = new AppStore(manager);
   const backups = new BackupManager(manager, store, paths);
+  const readingFiles = new ReadingFileManager(paths, store);
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 * 1024 * 1024 });
+  app.addContentTypeParser("application/pdf", { parseAs: "buffer", bodyLimit: 100 * 1024 * 1024 }, (_request, body, done) => done(null, body));
+  for (const type of ["image/png", "image/jpeg", "image/webp"]) app.addContentTypeParser(type, { parseAs: "buffer", bodyLimit: 10 * 1024 * 1024 }, (_request, body, done) => done(null, body));
 
   app.addHook("onRequest", async (request, reply) => {
     if (!["POST", "PATCH", "PUT", "DELETE"].includes(request.method)) return;
@@ -109,7 +113,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   app.delete("/api/collections/:collection/:id/permanent", async (request, reply) => {
     const { collection, id } = request.params as { collection: string; id: string };
     assertCollection(collection);
+    const readingBook = collection === "books" ? store.get("books", id, true) : null;
     store.permanentDelete(collection, id);
+    if (readingBook) readingFiles.removeBookFiles(readingBook);
     return reply.code(204).send();
   });
 
@@ -129,6 +135,63 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       }
     }
     return { data: updated };
+  });
+
+  app.post("/api/books/:id/progress", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const input = z.object({
+      session_date: z.string().min(1),
+      start_page: z.number().int().nonnegative(),
+      end_page: z.number().int().nonnegative(),
+      duration_minutes: z.number().int().nonnegative().default(0),
+      notes: z.string().default(""),
+    }).parse(request.body ?? {});
+    return reply.code(201).send({ data: store.recordReadingProgress(id, input) });
+  });
+
+  app.put("/api/reflections/daily", async (request) => {
+    const input = z.object({
+      reflection_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), source_category: z.string(), source_detail: z.string().default(""),
+      work_summary: z.string().default(""), life_summary: z.string().default(""), gains: z.string().default(""),
+      problems: z.string().default(""), improvements: z.string().default(""),
+      actions: z.array(z.object({ id: z.string().optional(), content: z.string().min(1) })).default([]),
+    }).parse(request.body ?? {});
+    return { data: store.saveDailyReflection(input) };
+  });
+
+  app.post("/api/reflection-actions/:id/add-to-plan", async (request) => {
+    const { id } = request.params as { id: string };
+    return { data: store.addReflectionActionToPlan(id) };
+  });
+
+  app.put("/api/books/:id/pdf", async (request) => {
+    const { id } = request.params as { id: string };
+    return { data: readingFiles.savePdf(id, request.body as Buffer, String(request.headers["x-file-name"] ?? "book.pdf")) };
+  });
+  app.get("/api/books/:id/pdf", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = readingFiles.resolvePdf(id);
+    reply.type("application/pdf");
+    reply.header("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(result.book.pdf_filename ?? "book.pdf")}`);
+    return reply.send(fs.createReadStream(result.path));
+  });
+  app.delete("/api/books/:id/pdf", async (request) => {
+    const { id } = request.params as { id: string };
+    return { data: readingFiles.removePdf(id) };
+  });
+  app.put("/api/books/:id/cover", async (request) => {
+    const { id } = request.params as { id: string };
+    return { data: readingFiles.saveCover(id, request.body as Buffer, String(request.headers["content-type"] ?? ""), String(request.headers["x-file-name"] ?? "cover")) };
+  });
+  app.get("/api/books/:id/cover", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = readingFiles.resolveCover(id);
+    reply.type(result.contentType);
+    return reply.send(fs.createReadStream(result.path));
+  });
+  app.delete("/api/books/:id/cover", async (request) => {
+    const { id } = request.params as { id: string };
+    return { data: readingFiles.removeCover(id) };
   });
 
   app.post("/api/plan-items/:id/postpone", async (request) => {
@@ -246,7 +309,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       // 缺失的构建资源必须返回 404。若退回 index.html，浏览器会把 HTML
       // 当作 JavaScript/CSS 加载并得到一片白屏。
       if (request.url.startsWith("/assets/")) {
-        return reply.code(404).send({ error: { code: "ASSET_NOT_FOUND", message: "页面资源不存在，请重新启动木子工作台" } });
+        return reply.code(404).send({ error: { code: "ASSET_NOT_FOUND", message: "页面资源不存在，请重新启动samuel的工作台" } });
       }
       return reply.header("Cache-Control", "no-cache").sendFile("index.html");
     });

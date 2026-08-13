@@ -2012,3 +2012,66 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   .game-grid, .history-table, .meal-columns { grid-template-columns: 1fr; }
   .consult-grid, .fitness-grid, .settings-grid { gap: 12px; }
 }
+
+/* --- 15. 读书 ------------------------------------------------------------ */
+.reading-summary, .reading-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.reading-summary button, .reading-stats article { min-height: 74px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-raised); padding: 14px; text-align: left; display: grid; gap: 5px; }
+.reading-summary strong, .reading-stats strong { font-size: 20px; font-weight: 650; }
+.reading-summary span, .reading-stats span { color: var(--text-soft); font-size: 11px; }
+.reading-filters { display: flex; flex-wrap: wrap; gap: 5px; }
+.book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 13px; }
+.book-card { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-raised); padding: 0; overflow: hidden; text-align: left; display: grid; grid-template-columns: 92px minmax(0, 1fr); min-height: 168px; color: var(--text); }
+.book-card:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.book-cover { background: linear-gradient(145deg, rgba(239, 193, 116, .36), rgba(177, 113, 91, .18)); display: grid; place-items: center; align-content: center; gap: 15px; color: var(--accent); }
+.book-cover img { width: 100%; height: 128px; object-fit: cover; align-self: stretch; }
+.book-card-copy { padding: 17px 15px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.book-card-copy > span, .book-card-copy small { color: var(--text-soft); font-size: 10.5px; }
+.book-card-copy h2 { margin: 0; font-size: 14px; line-height: 1.35; }
+.book-card-copy strong { font-size: 12px; }
+.reading-progress { height: 5px; border-radius: 999px; background: var(--surface-inset); overflow: hidden; margin-top: auto; }
+.reading-progress i { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.reading-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.reading-detail-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 14px; margin-bottom: 14px; }
+.pdf-entry { display: flex; align-items: center; gap: 13px; padding: 14px; border-radius: var(--radius-inset); background: var(--surface-inset); }
+.pdf-entry > div { min-width: 0; flex: 1; }
+.pdf-entry p { margin: 4px 0 0; color: var(--text-soft); font-size: 11px; }
+.detail-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.reading-history, .reading-notes { display: grid; gap: 9px; }
+.reading-history article, .reading-notes article { border: 1px solid var(--border); border-radius: var(--radius-inset); background: var(--surface-raised); padding: 12px 14px; }
+.reading-history span { display: block; color: var(--text-soft); font-size: 10.5px; margin-top: 3px; }
+.reading-history p { margin: 7px 0 0; font-size: 11px; }
+.reading-notes article header { display: flex; justify-content: space-between; gap: 10px; }
+.reading-notes article header div { display: grid; gap: 3px; }
+.reading-notes article header span { color: var(--text-soft); font-size: 10.5px; }
+.reading-notes blockquote { margin: 12px 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-inset); font-size: 11.5px; line-height: 1.65; }
+.reading-notes p { display: grid; grid-template-columns: 42px 1fr; gap: 8px; margin: 8px 0 0; font-size: 11.5px; line-height: 1.6; }
+.reading-notes b { color: var(--text-soft); font-weight: 600; }
+@media (max-width: 760px) { .reading-summary, .reading-stats { grid-template-columns: repeat(2, 1fr); } .reading-detail-grid { grid-template-columns: 1fr; } .book-grid { grid-template-columns: 1fr; } .pdf-entry { align-items: flex-start; flex-wrap: wrap; } }
+
+/* --- 10c. 每日思考 -------------------------------------------------------- */
+.reflection-overview { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:14px; }
+.reflection-overview article { min-height:74px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-raised); padding:14px; display:grid; gap:5px; }
+.reflection-overview strong { font-size:20px; } .reflection-overview span { color:var(--text-soft); font-size:11px; }
+.reflection-date-actions { display:flex; gap:8px; align-items:center; } .reflection-date-actions input { height:34px; border:1px solid var(--border); border-radius:8px; background:var(--surface-strong); color:var(--text); padding:0 9px; }
+.reflection-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.reflection-form label { display:grid; gap:6px; } .reflection-form label.wide { grid-column:1/-1; }
+.reflection-form label > span, .reflection-actions h3 { color:var(--text-soft); font-size:11px; font-weight:600; }
+.reflection-form input,.reflection-form select,.reflection-form textarea,.reflection-action-input input,.thought-toolbar input,.thought-toolbar select { width:100%; border:1px solid var(--border); border-radius:var(--radius-inset); background:var(--surface-strong); color:var(--text); padding:9px 10px; }
+.reflection-form textarea { resize:vertical; line-height:1.55; }
+.reflection-actions { margin-top:16px; display:grid; gap:8px; } .reflection-actions > div:not(.reflection-action-input) { display:flex; align-items:center; gap:9px; border:1px solid var(--border); border-radius:var(--radius-inset); padding:9px 11px; background:var(--surface-raised); }
+.reflection-actions > div > span:first-child { flex:1; } .reflection-actions button[aria-label^="删除行动"] { border:0; background:transparent; color:var(--text-soft); }
+.reflection-action-input { display:flex; gap:8px; }.reflection-action-input input { flex:1; }
+.reflection-lower { display:grid; grid-template-columns:1.35fr .65fr; gap:14px; margin-top:14px; }
+.thought-toolbar { display:grid; grid-template-columns:1fr 140px; gap:8px; margin-bottom:10px; }.thought-list { display:grid; gap:9px; }
+.thought-list article { border:1px solid var(--border); border-radius:var(--radius-inset); background:var(--surface-raised); padding:12px; }.thought-list header { display:flex; justify-content:space-between; gap:10px; }.thought-list header div { display:flex; align-items:center; gap:7px; }.thought-list small { color:var(--text-soft); }.thought-list p { white-space:pre-wrap; line-height:1.6; }.thought-list footer { display:flex; justify-content:flex-end; }
+.reflection-history { display:grid; gap:7px; }.reflection-history button { display:flex; gap:9px; align-items:flex-start; text-align:left; border:1px solid var(--border); border-radius:var(--radius-inset); background:var(--surface-raised); padding:10px; color:var(--text); }.reflection-history button.active { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }.reflection-history span { display:grid; gap:3px; }.reflection-history small { color:var(--text-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:220px; }
+@media (max-width:760px) { .reflection-overview { grid-template-columns:repeat(2,1fr); }.reflection-form,.reflection-lower { grid-template-columns:1fr; }.reflection-form label.wide { grid-column:auto; }.thought-toolbar { grid-template-columns:1fr; }.reflection-date-actions { align-items:stretch; flex-direction:column; } }
+.pdf-reader { display: grid; gap: 10px; }
+.pdf-toolbar { display: flex; align-items: center; justify-content: center; gap: 7px; flex-wrap: wrap; padding: 8px; border-radius: var(--radius-inset); background: var(--surface-inset); }
+.pdf-toolbar label { font-size: 11px; color: var(--text-soft); }
+.pdf-toolbar input { width: 58px; height: 30px; text-align: center; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-raised); color: var(--text); }
+.pdf-zoom { display: flex; align-items: center; gap: 3px; }
+.pdf-zoom b { min-width: 42px; text-align: center; font-size: 10.5px; }
+.pdf-canvas-wrap { min-height: 55vh; max-height: 72vh; overflow: auto; padding: 16px; border-radius: var(--radius-inset); background: color-mix(in srgb, var(--text) 7%, var(--surface-inset)); text-align: center; }
+.pdf-canvas-wrap canvas { max-width: none; margin: 0 auto; box-shadow: 0 14px 38px rgba(20, 30, 36, .2); background: white; }
+.pdf-loading { width: min(620px, 90%); margin: 20px auto; }

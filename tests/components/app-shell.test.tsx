@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/App";
 import { useWorkspace, WorkspaceProvider } from "../../src/WorkspaceContext";
 
-const collections = ["planItems", "quickMemos", "mediaContents", "devProjects", "devMilestones", "devWorkItems", "devLogs", "clients", "consultingProjects", "consultingInteractions", "consultingDeliverables", "consultingFollowups", "consultingTimeEntries", "workoutTemplates", "workoutTemplateExercises", "workouts", "workoutExercises", "workoutSets", "bodyMetrics", "nutritionTargets", "foods", "meals", "mealItems", "entertainmentItems", "playSessions"];
+const collections = ["planItems", "quickMemos", "mediaContents", "devProjects", "devMilestones", "devWorkItems", "devLogs", "clients", "consultingProjects", "consultingInteractions", "consultingDeliverables", "consultingFollowups", "consultingTimeEntries", "workoutTemplates", "workoutTemplateExercises", "workouts", "workoutExercises", "workoutSets", "bodyMetrics", "nutritionTargets", "foods", "meals", "mealItems", "entertainmentItems", "playSessions", "books", "readingSessions", "readingNotes", "dailyReflections", "reflectionActions", "thoughtNotes"];
 
 function mockApi(theme = "light", backupStatus: Record<string, any> | null = null, appearance?: unknown) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -34,10 +34,10 @@ function renderApp() {
 afterEach(() => { vi.unstubAllGlobals(); document.documentElement.removeAttribute("data-theme"); document.documentElement.removeAttribute("data-appearance"); window.history.pushState({}, "", "/"); });
 
 describe("application shell", () => {
-  it("renders all nine requested navigation destinations", async () => {
+  it("renders all eleven requested navigation destinations", async () => {
     mockApi();
     const { container } = renderApp();
-    for (const label of ["首页总览", "今日计划", "自媒体", "开发工作", "咨询工作", "健身计划", "饮食计划", "游戏娱乐", "数据与设置"]) {
+    for (const label of ["首页总览", "今日计划", "自媒体", "开发工作", "咨询工作", "健身计划", "饮食计划", "游戏娱乐", "读书", "思考", "数据与设置"]) {
       expect(await screen.findByRole("link", { name: label })).toBeInTheDocument();
     }
     expect(screen.getByRole("button", { name: /搜索所有内容/ })).toBeInTheDocument();
@@ -87,7 +87,7 @@ describe("application shell", () => {
     expect(container.querySelector(".app-shell")).toHaveClass("neo-shell");
     expect(document.querySelector(".ambient-environment")).not.toBeInTheDocument();
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", "/assets/neo/muzi-app-icon-brand.png");
-    expect(container.querySelectorAll(".neo-nav-emblem")).toHaveLength(9);
+    expect(container.querySelectorAll(".neo-nav-emblem")).toHaveLength(11);
   });
 
   it("shows save failure instead of a false saved state", async () => {
@@ -113,7 +113,7 @@ describe("application shell", () => {
     const fetchMock = mockApi();
     renderApp();
     await userEvent.click(await screen.findByRole("button", { name: "保存并退出" }));
-    expect(await screen.findByText("数据已保存，木子工作台已安全退出")).toBeInTheDocument();
+    expect(await screen.findByText("数据已保存，samuel的工作台已安全退出")).toBeInTheDocument();
     const calls = fetchMock.mock.calls.map(([input]) => String(input));
     expect(calls).toContain("/api/system/save");
     expect(calls).toContain("/api/system/save-and-exit");

@@ -16,7 +16,9 @@ npm run app:start
 
 ## 2. 文件位置
 
-macOS 默认根目录为 `~/Library/Application Support/MuziWorkspace`，Windows 默认为 `%LOCALAPPDATA%\MuziWorkspace`：
+macOS 默认根目录为 `~/Library/Application Support/MuziWorkspace`，Windows 默认为 `%LOCALAPPDATA%\MuziWorkspace`。读书模块上传的 PDF 和封面位于同一数据根目录的 `attachments/reading` 中，迁移电脑时必须和数据库一起复制：
+
+思考模块的每日复盘、行动和自由思考全部保存在主 SQLite 数据库中，会随手动备份、自动备份、恢复和 ZIP 数据导出一起处理。
 
 - `data/app.sqlite`：唯一主数据库。
 - `backups/*.sqlite`：完整、独立、可复制的备份。

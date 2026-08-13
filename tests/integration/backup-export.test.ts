@@ -71,11 +71,17 @@ describe("production backup, restore and export", () => {
     try {
       store.create("mediaContents", { title: "导出内容", stage: "idea" });
       store.create("entertainmentItems", { name: "导出游戏", status: "playing" });
+      const book = store.create("books", { title: "导出书籍", status: "reading" });
+      const pdfFile = `${book.id}.pdf`;
+      fs.writeFileSync(path.join(getAppPaths(directory).readingFilesDir, pdfFile), "%PDF-1.4\n%%EOF");
+      store.update("books", book.id, { pdf_file_id: pdfFile, pdf_filename: "导出书籍.pdf" });
       const result = await backups.exportAll();
       const zip = await JSZip.loadAsync(fs.readFileSync(result.path));
       expect(zip.file("manifest.json")).not.toBeNull();
       expect(zip.file("all-data.json")).not.toBeNull();
       expect(zip.file("csv/mediaContents.csv")).not.toBeNull();
+      expect(zip.file(`attachments/reading/${pdfFile}`)).not.toBeNull();
+      expect(zip.file("attachments/manifest.json")).not.toBeNull();
       const allData = JSON.parse(await zip.file("all-data.json")!.async("string"));
       expect(allData.mediaContents[0].title).toBe("导出内容");
       expect(allData.entertainmentItems[0].name).toBe("导出游戏");

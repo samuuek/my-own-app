@@ -66,7 +66,7 @@ describe("SQLite persistence and migrations", () => {
     try {
       const tables = manager.db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all() as Array<{ name: string }>;
       const names = tables.map((row) => row.name);
-      expect(names).toEqual(expect.arrayContaining(["plan_items", "media_contents", "dev_projects", "consulting_projects", "workouts", "meals", "entertainment_items", "trash_entries"]));
+      expect(names).toEqual(expect.arrayContaining(["plan_items", "media_contents", "dev_projects", "consulting_projects", "workouts", "meals", "entertainment_items", "books", "reading_sessions", "reading_notes", "daily_reflections", "reflection_actions", "thought_notes", "trash_entries"]));
       const plan = manager.db.prepare("EXPLAIN QUERY PLAN SELECT * FROM plan_items WHERE plan_date = ? AND status = ? AND deleted_at IS NULL").all("2026-08-02", "todo") as Array<{ detail: string }>;
       expect(plan.some((row) => row.detail.includes("idx_plan_items_date_status"))).toBe(true);
     } finally {
@@ -106,7 +106,7 @@ describe("SQLite persistence and migrations", () => {
 
       expect(template).toEqual({ name: "原有训练模板", notes: "升级后不能丢失", body_part: "" });
       expect(workoutColumns.map((column) => column.name)).toContain("body_part");
-      expect(versions.at(-1)?.version).toBe("002_workout_body_part.sql");
+      expect(versions.at(-1)?.version).toBe("004_reflection_module.sql");
     } finally {
       upgradedManager.close();
     }

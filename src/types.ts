@@ -26,6 +26,12 @@ export type WorkspaceState = {
   mealItems: Entity[];
   entertainmentItems: Entity[];
   playSessions: Entity[];
+  books: Entity[];
+  readingSessions: Entity[];
+  readingNotes: Entity[];
+  dailyReflections: Entity[];
+  reflectionActions: Entity[];
+  thoughtNotes: Entity[];
   settings: Record<string, any>;
   trash: Entity[];
 };

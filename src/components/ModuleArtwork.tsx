@@ -9,6 +9,8 @@ export const moduleArtworkSources = {
   fitness: "/assets/module-icons/fitness-v1.webp",
   diet: "/assets/module-icons/diet-v1.webp",
   entertainment: "/assets/module-icons/entertainment-v1.webp",
+  reading: "/assets/module-icons/reading-v1.svg",
+  reflection: "/assets/module-icons/reflection-v1.svg",
   settings: "/assets/module-icons/settings-v1.webp",
 } as const;
 
