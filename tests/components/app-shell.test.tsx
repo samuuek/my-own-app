@@ -42,7 +42,7 @@ describe("application shell", () => {
     }
     expect(screen.getByRole("button", { name: /搜索所有内容/ })).toBeInTheDocument();
     expect(screen.getByText("仅保存在这台电脑")).toBeInTheDocument();
-    expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", "/assets/brand/muzi-mark.svg");
+    expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", "/assets/app/app-icon-brand-512-v2.png");
     expect(container.querySelector(".brand-mark")).toHaveTextContent("");
   });
 
@@ -86,7 +86,7 @@ describe("application shell", () => {
     await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("neo"));
     expect(container.querySelector(".app-shell")).toHaveClass("neo-shell");
     expect(document.querySelector(".ambient-environment")).not.toBeInTheDocument();
-    expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", "/assets/neo/muzi-app-icon-brand.png");
+    expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", "/assets/app/app-icon-brand-512-v2.png");
     expect(container.querySelectorAll(".neo-nav-emblem")).toHaveLength(11);
   });
 

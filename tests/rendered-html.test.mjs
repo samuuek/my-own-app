@@ -11,7 +11,8 @@ test("production HTML contains the local app entry point and no remote runtime a
     .join("\n");
   assert.match(html, /<title>samuel的工作台<\/title>/);
   assert.match(html, /<div id="root"><\/div>/);
-  assert.match(html, /\/assets\/neo\/muzi-app-icon-favicon\.png/);
+  assert.match(html, /\/assets\/app\/favicon-64-v2\.png/);
+  assert.match(html, /\/assets\/app\/apple-touch-icon-180-v2\.png/);
   assert.doesNotMatch(html, /https?:\/\/(fonts|cdn|unpkg|jsdelivr)\./i);
   assert.match(html, /\/assets\//);
   for (const file of ["chromatic-polymer-light-v1.webp", "chromatic-polymer-dark-v1.webp"]) {
@@ -30,6 +31,9 @@ test("production HTML contains the local app entry point and no remote runtime a
   }
   for (const file of ["module-emblems.png", "muzi-app-icon-v1.png", "muzi-app-icon-brand.png", "muzi-app-icon-favicon.png"]) {
     assert.equal(fs.existsSync(new URL(`../dist/assets/neo/${file}`, import.meta.url)), true, `${file} should be bundled locally`);
+  }
+  for (const file of ["app-icon-1024-v2.png", "app-icon-brand-512-v2.png", "apple-touch-icon-180-v2.png", "favicon-64-v2.png", "muzi-workspace-v2.ico"]) {
+    assert.equal(fs.existsSync(new URL(`../dist/assets/app/${file}`, import.meta.url)), true, `${file} should be bundled locally`);
   }
   assert.match(css, /:root\[data-appearance=neo\]/);
   assert.match(css, /\/assets\/neo\/module-emblems\.png/);
