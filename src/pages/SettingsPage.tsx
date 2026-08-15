@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Database, FolderOpen, ShieldCheck, DownloadSimple, ArrowCounterClockwise, Trash, Sun, Moon, Check, Archive, Notebook, Stack, SquaresFour } from "@phosphor-icons/react";
+import { useNavigate } from "react-router-dom";
+import { Database, FolderOpen, ShieldCheck, DownloadSimple, ArrowCounterClockwise, Trash, Sun, Moon, Check, Archive, Notebook, Stack, SquaresFour, DeviceMobile } from "@phosphor-icons/react";
 import { api } from "../api";
 import { useWorkspace } from "../WorkspaceContext";
 import type { CollectionName } from "../types";
@@ -9,11 +10,12 @@ import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, PageHeader, Secti
 import { ModuleArtwork } from "../components/ModuleArtwork";
 import { normalizeAppearance } from "../appearance";
 
-const collectionLabels: Record<string, string> = { planItems: "今日计划", quickMemos: "快速备忘", mediaContents: "自媒体", devProjects: "开发项目", devMilestones: "里程碑", devWorkItems: "开发工作项", devLogs: "开发日志", clients: "客户", consultingProjects: "咨询项目", consultingInteractions: "沟通记录", consultingDeliverables: "交付物", consultingFollowups: "咨询跟进", consultingTimeEntries: "咨询时长", workoutTemplates: "训练模板", workoutTemplateExercises: "模板动作", workouts: "训练记录", workoutExercises: "训练动作", workoutSets: "训练组", bodyMetrics: "身体数据", nutritionTargets: "营养目标", foods: "常用食物", meals: "餐食", mealItems: "餐食明细", entertainmentItems: "游戏娱乐", playSessions: "游玩记录", books: "书籍", readingSessions: "阅读进度", readingNotes: "阅读笔记", dailyReflections: "每日复盘", reflectionActions: "复盘行动", thoughtNotes: "自由思考" };
+const collectionLabels: Record<string, string> = { planItems: "今日计划", importantDates: "重要日期", longTermGoals: "长期目标", focusTimers: "专注计时", quickMemos: "快速备忘", mediaContents: "自媒体", devProjects: "开发项目", devMilestones: "里程碑", devWorkItems: "开发工作项", devLogs: "开发日志", clients: "客户", consultingProjects: "咨询项目", consultingInteractions: "沟通记录", consultingDeliverables: "交付物", consultingFollowups: "咨询跟进", consultingTimeEntries: "咨询时长", workoutTemplates: "训练模板", workoutTemplateExercises: "模板动作", workouts: "训练记录", workoutExercises: "训练动作", workoutSets: "训练组", bodyMetrics: "身体数据", nutritionTargets: "营养目标", foods: "常用食物", meals: "餐食", mealItems: "餐食明细", entertainmentItems: "游戏娱乐", playSessions: "游玩记录", books: "书籍", readingSessions: "阅读进度", readingNotes: "阅读笔记", dailyReflections: "每日复盘", reflectionActions: "复盘行动", thoughtNotes: "自由思考" };
 const dashboardOptions = [{ value: "media", label: "自媒体" }, { value: "development", label: "开发工作" }, { value: "consulting", label: "咨询工作" }, { value: "fitness", label: "健身计划" }, { value: "diet", label: "饮食计划" }, { value: "entertainment", label: "游戏娱乐" }];
 
 export function SettingsPage() {
   const { data, run } = useWorkspace();
+  const navigate = useNavigate();
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus });
   const backups = useQuery({ queryKey: ["backups"], queryFn: api.backups });
   const [busy, setBusy] = useState("");
@@ -36,6 +38,10 @@ export function SettingsPage() {
     setDashboardModules(next);
     void saveSetting("dashboardModules", next).catch(() => setDashboardModules(null));
   };
+  const reopenOnboarding = async () => {
+    await saveSetting("progressWorkbenchOnboarding", "pending");
+    navigate("/");
+  };
   return (
     <div>
       <PageHeader icon={<ModuleArtwork module="settings" />} eyebrow="本机数据控制" title="数据与设置" description="查看数据文件、创建备份、恢复历史版本并调整使用偏好。" />
@@ -50,8 +56,9 @@ export function SettingsPage() {
       </div>
       <Section title="使用偏好" description="设置会保存在主数据文件中">
         <div className="preferences">
-          <div><div><strong>界面风格</strong><small>功能和数据保持一致，只改变视觉系统</small></div><div className="appearance-toggle style-toggle" role="group" aria-label="界面风格"><button className={appearance === "liquid" ? "active" : ""} aria-label="Liquid Glass" aria-pressed={appearance === "liquid"} onClick={() => void saveSetting("appearance", "liquid")}><span><Stack size={17} /><strong>Liquid Glass</strong></span><small>环境色、透明材质与柔和层次</small></button><button className={appearance === "notebook" ? "active" : ""} aria-label="Notion 笔记" aria-pressed={appearance === "notebook"} onClick={() => void saveSetting("appearance", "notebook")}><span><Notebook size={17} /><strong>Notion 笔记</strong></span><small>紧凑画布、纯平表面与低饱和标记</small></button><button className={appearance === "neo" ? "active" : ""} aria-label="Neo-Brutalism" aria-pressed={appearance === "neo"} onClick={() => void saveSetting("appearance", "neo")}><span><SquaresFour size={17} /><strong>Neo-Brutalism</strong></span><small>多色印刷、硬边框与机械反馈</small></button></div></div>
+          <div><div><strong>界面风格</strong><small>功能和数据保持一致，只改变视觉系统</small></div><div className="appearance-toggle style-toggle" role="group" aria-label="界面风格"><button className={appearance === "ios" ? "active" : ""} aria-label="iPhone 系统" aria-pressed={appearance === "ios"} onClick={() => void saveSetting("appearance", "ios")}><span><DeviceMobile size={17} /><strong>iPhone 系统</strong></span><small>系统蓝、圆角卡片与清晰层级</small></button><button className={appearance === "liquid" ? "active" : ""} aria-label="Liquid Glass" aria-pressed={appearance === "liquid"} onClick={() => void saveSetting("appearance", "liquid")}><span><Stack size={17} /><strong>Liquid Glass</strong></span><small>环境色、透明材质与柔和层次</small></button><button className={appearance === "notebook" ? "active" : ""} aria-label="Notion 笔记" aria-pressed={appearance === "notebook"} onClick={() => void saveSetting("appearance", "notebook")}><span><Notebook size={17} /><strong>Notion 笔记</strong></span><small>紧凑画布、纯平表面与低饱和标记</small></button><button className={appearance === "neo" ? "active" : ""} aria-label="Neo-Brutalism" aria-pressed={appearance === "neo"} onClick={() => void saveSetting("appearance", "neo")}><span><SquaresFour size={17} /><strong>Neo-Brutalism</strong></span><small>多色印刷、硬边框与机械反馈</small></button></div></div>
           <div><div><strong>界面主题</strong><small>选择适合长时间使用的明暗风格</small></div><div className="theme-toggle" role="group" aria-label="界面主题"><button className={(data.settings.theme ?? "light") === "light" ? "active" : ""} aria-pressed={(data.settings.theme ?? "light") === "light"} onClick={() => void saveSetting("theme", "light")}><Sun size={16} />浅色</button><button className={data.settings.theme === "dark" ? "active" : ""} aria-pressed={data.settings.theme === "dark"} onClick={() => void saveSetting("theme", "dark")}><Moon size={16} />深色</button></div></div>
+          <div><div><strong>新手引导</strong><small>重新查看进度工作台的三步介绍</small></div><Button variant="secondary" onClick={() => void reopenOnboarding()}>重新查看新手引导</Button></div>
           <label><div><strong>每周起始日</strong><small>影响今日计划的本周视图</small></div><select value={data.settings.weekStart ?? "monday"} onChange={(event) => void saveSetting("weekStart", event.target.value)}><option value="monday">星期一</option><option value="sunday">星期日</option></select></label>
           <label><div><strong>日期格式</strong><small>用于列表和时间线</small></div><select value={data.settings.dateFormat ?? "zh-CN"} onChange={(event) => void saveSetting("dateFormat", event.target.value)}><option value="zh-CN">中文日期</option><option value="iso">YYYY-MM-DD</option></select></label>
           <fieldset className="dashboard-options"><legend><strong>首页模块摘要</strong><small>选择首页底部需要显示的模块</small></legend><div>{dashboardOptions.map((option) => <label key={option.value}><input type="checkbox" checked={visibleModules.includes(option.value)} onChange={(event) => toggleDashboardModule(option.value, event.target.checked)} />{option.label}</label>)}</div></fieldset>

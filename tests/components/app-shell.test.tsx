@@ -1,19 +1,28 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/App";
 import { useWorkspace, WorkspaceProvider } from "../../src/WorkspaceContext";
+import { SettingsPage } from "../../src/pages/SettingsPage";
 
-const collections = ["planItems", "quickMemos", "mediaContents", "devProjects", "devMilestones", "devWorkItems", "devLogs", "clients", "consultingProjects", "consultingInteractions", "consultingDeliverables", "consultingFollowups", "consultingTimeEntries", "workoutTemplates", "workoutTemplateExercises", "workouts", "workoutExercises", "workoutSets", "bodyMetrics", "nutritionTargets", "foods", "meals", "mealItems", "entertainmentItems", "playSessions", "books", "readingSessions", "readingNotes", "dailyReflections", "reflectionActions", "thoughtNotes"];
+const collections = ["planItems", "importantDates", "longTermGoals", "focusTimers", "quickMemos", "mediaContents", "devProjects", "devMilestones", "devWorkItems", "devLogs", "clients", "consultingProjects", "consultingInteractions", "consultingDeliverables", "consultingFollowups", "consultingTimeEntries", "workoutTemplates", "workoutTemplateExercises", "workouts", "workoutExercises", "workoutSets", "bodyMetrics", "nutritionTargets", "foods", "meals", "mealItems", "entertainmentItems", "playSessions", "books", "readingSessions", "readingNotes", "dailyReflections", "reflectionActions", "thoughtNotes"];
 
 function mockApi(theme = "light", backupStatus: Record<string, any> | null = null, appearance?: unknown) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     let data: any = null;
     if (url.startsWith("/api/state")) data = { ...Object.fromEntries(collections.map((name) => [name, []])), settings: { theme, ...(appearance === undefined ? {} : { appearance }) }, trash: [] };
-    else if (url.startsWith("/api/dashboard")) data = { date: "2026-08-02", overview: { completed: 0, total: 0, progress: 0, scheduledMinutes: 0 }, timeline: [], unscheduled: [], attention: [], summaries: { media: [], development: [], consulting: [], fitness: [], diet: [], entertainment: [] } };
-    else if (url.startsWith("/api/system/status")) data = { latestBackup: null, backupStatus };
+    else if (url.startsWith("/api/dashboard")) data = { date: "2026-08-02", overview: { completed: 0, total: 0, progress: 0, scheduledMinutes: 0 }, timeline: [], unscheduled: [], importantDates: [], longTermGoals: [], activeFocusTimer: null, sectionErrors: {}, attention: [], summaries: { media: [], development: [], consulting: [], fitness: [], diet: [], entertainment: [] } };
+    else if (url.startsWith("/api/system/status")) data = {
+      latestBackup: null,
+      backupStatus,
+      dataFile: { path: "C:/test/app.sqlite", size: 1024, modifiedAt: "2026-08-15T01:00:00.000Z", writable: true },
+      dataDirectory: "C:/test",
+      backupsDirectory: "C:/test/backups",
+      exportsDirectory: "C:/test/exports",
+    };
     else if (url.startsWith("/api/system/save")) data = { savedAt: "2026-08-02T12:00:00.000Z", database: "ok", dataFile: "/tmp/app.sqlite" };
     return { ok: true, status: 200, json: async () => ({ data }) } as Response;
   });
@@ -52,23 +61,31 @@ describe("application shell", () => {
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
   });
 
-  it("uses liquid as the safe default for missing, legacy and unknown appearance values", async () => {
+  it("uses iPhone system as the safe default for missing, legacy and unknown appearance values", async () => {
     mockApi("light", null, "glass");
     const first = renderApp();
-    await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("liquid"));
-    expect(document.querySelector(".ambient-environment")).toBeInTheDocument();
+    await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("ios"));
+    expect(document.querySelector(".ios-shell")).toBeInTheDocument();
+    expect(document.querySelector(".ambient-environment")).not.toBeInTheDocument();
     expect(document.querySelector(".neo-shell")).not.toBeInTheDocument();
     first.unmount();
 
     mockApi("light", null, "legacy-paper");
     const second = renderApp();
-    await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("liquid"));
-    expect(document.querySelector(".ambient-environment")).toBeInTheDocument();
+    await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("ios"));
+    expect(document.querySelector(".ios-shell")).toBeInTheDocument();
     second.unmount();
 
     mockApi();
     renderApp();
+    await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("ios"));
+  });
+
+  it("keeps persisted liquid appearance and its ambient layer", async () => {
+    mockApi("light", null, "liquid");
+    renderApp();
     await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("liquid"));
+    expect(document.querySelector(".ambient-environment")).toBeInTheDocument();
   });
 
   it("applies the persisted notebook appearance without liquid or neo environment layers", async () => {
@@ -88,6 +105,16 @@ describe("application shell", () => {
     expect(document.querySelector(".ambient-environment")).not.toBeInTheDocument();
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", "/assets/app/app-icon-brand-512-v2.png");
     expect(container.querySelectorAll(".neo-nav-emblem")).toHaveLength(11);
+  });
+
+  it("offers iPhone system as a fourth appearance in settings", async () => {
+    mockApi("light", null, "ios");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<MemoryRouter><QueryClientProvider client={client}><WorkspaceProvider><SettingsPage /></WorkspaceProvider></QueryClientProvider></MemoryRouter>);
+    expect(await screen.findByRole("button", { name: "iPhone 系统" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Liquid Glass" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Notion 笔记" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Neo-Brutalism" })).toBeInTheDocument();
   });
 
   it("shows save failure instead of a false saved state", async () => {

@@ -40,7 +40,7 @@ const collectionRoutes: Record<string, string> = {
   consultingInteractions: "/consulting", consultingDeliverables: "/consulting", consultingFollowups: "/consulting",
   consultingTimeEntries: "/consulting", workoutTemplates: "/fitness", workouts: "/fitness", bodyMetrics: "/fitness",
   nutritionTargets: "/diet", foods: "/diet", meals: "/diet", mealItems: "/diet", entertainmentItems: "/entertainment",
-  playSessions: "/entertainment", quickMemos: "/",
+  playSessions: "/entertainment", quickMemos: "/", importantDates: "/", longTermGoals: "/", focusTimers: "/",
   books: "/reading", readingSessions: "/reading", readingNotes: "/reading",
   dailyReflections: "/reflection", reflectionActions: "/reflection", thoughtNotes: "/reflection",
 };
@@ -140,7 +140,7 @@ export function AppLayout() {
 
   return (
     <div
-      className={classNames("app-shell", appearance === "neo" && "neo-shell", collapsed && "sidebar-collapsed")}
+      className={classNames("app-shell", appearance === "ios" && "ios-shell", appearance === "neo" && "neo-shell", collapsed && "sidebar-collapsed")}
       data-appearance={appearance}
       data-module={currentPage.module}
       data-ambient={ambientScene}
