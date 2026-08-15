@@ -1,4 +1,5 @@
 import type { AppStore, Entity } from "./store.js";
+import { resolveImportantDate } from "./workbench.js";
 
 function plusDays(date: string, days: number): string {
   const value = new Date(`${date}T12:00:00`);
@@ -11,8 +12,11 @@ export function buildDashboard(store: AppStore, date: string): Record<string, an
     ...item,
     display_title: store.sourceTitle(item.source_entity_type, item.source_entity_id) || item.title,
   }));
-  const todayItems = planItems.filter((item) => item.plan_date === date && item.status !== "cancelled");
-  const timeline = todayItems.filter((item) => item.start_time).sort((a, b) => a.start_time.localeCompare(b.start_time));
+  const todayItems = planItems
+    .filter((item) => item.plan_date === date && item.status !== "cancelled")
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)
+      || String(a.start_time || "").localeCompare(String(b.start_time || "")));
+  const timeline = todayItems.filter((item) => item.start_time);
   const unscheduled = todayItems.filter((item) => !item.start_time);
   const completed = todayItems.filter((item) => item.status === "done").length;
   const totalMinutes = todayItems.reduce((sum, item) => sum + Number(item.estimated_minutes || 0), 0);
@@ -49,6 +53,25 @@ export function buildDashboard(store: AppStore, date: string): Record<string, an
   const workouts = store.list("workouts");
   const meals = store.list("meals");
   const entertainment = store.list("entertainmentItems");
+  const sectionErrors: Record<string, string> = {};
+  const safeSection = <T,>(key: string, fallback: T, read: () => T): T => {
+    try {
+      return read();
+    } catch (error) {
+      sectionErrors[key] = error instanceof Error ? error.message : "数据不可用";
+      return fallback;
+    }
+  };
+  const importantDates = safeSection("importantDates", [] as Entity[], () => store
+    .list("importantDates")
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+    .map((item) => ({
+      ...item,
+      ...resolveImportantDate(item.target_date, item.recurrence ?? "none", date),
+    })));
+  const longTermGoals = safeSection("longTermGoals", [] as Entity[], () => store
+    .list("longTermGoals")
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)));
 
   return {
     date,
@@ -60,6 +83,10 @@ export function buildDashboard(store: AppStore, date: string): Record<string, an
     },
     timeline,
     unscheduled,
+    importantDates,
+    longTermGoals,
+    activeFocusTimer: null,
+    sectionErrors,
     attention: attention.slice(0, 12),
     summaries: {
       media: media.filter((item) => ["producing", "ready"].includes(item.stage)).slice(0, 3),

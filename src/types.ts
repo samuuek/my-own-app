@@ -46,8 +46,19 @@ export type DashboardData = {
   overview: { completed: number; total: number; progress: number; scheduledMinutes: number };
   timeline: Entity[];
   unscheduled: Entity[];
+  importantDates: Entity[];
+  longTermGoals: Entity[];
+  activeFocusTimer: FocusTimerSnapshot | null;
+  sectionErrors: Partial<Record<"importantDates" | "longTermGoals" | "focusTimer", string>>;
   attention: Entity[];
   summaries: Record<string, Entity[]>;
+};
+
+export type FocusTimerSnapshot = Entity & {
+  status: "running" | "paused" | "completed" | "cancelled";
+  remainingSeconds: number;
+  actualSeconds: number | null;
+  snapshotAt: string;
 };
 
 export type BackupRecord = {
