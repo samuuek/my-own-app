@@ -53,6 +53,10 @@ describe("application shell", () => {
     expect(screen.getByText("仅保存在这台电脑")).toBeInTheDocument();
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", "/assets/app/app-icon-brand-512-v2.png");
     expect(container.querySelector(".brand-mark")).toHaveTextContent("");
+    expect(await screen.findByText("今日进度")).toBeInTheDocument();
+    expect(screen.getByText("重要日期")).toBeInTheDocument();
+    expect(screen.getByText("长期目标")).toBeInTheDocument();
+    expect(screen.getByText("专注计时")).toBeInTheDocument();
   });
 
   it("applies the persisted theme to the document", async () => {

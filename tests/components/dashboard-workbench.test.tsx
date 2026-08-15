@@ -5,6 +5,7 @@ import { ProgressOverview } from "../../src/features/workbench/ProgressOverview"
 import { ImportantDatesPanel } from "../../src/features/workbench/ImportantDatesPanel";
 import { LongTermGoalsPanel } from "../../src/features/workbench/LongTermGoalsPanel";
 import { FocusTimerPanel } from "../../src/features/workbench/FocusTimerPanel";
+import { WorkbenchDialogs } from "../../src/features/workbench/WorkbenchDialogs";
 
 afterEach(() => vi.useRealTimers());
 
@@ -69,5 +70,19 @@ describe("dashboard workbench panels", () => {
     expect(onResume).toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "结束专注" }));
     expect(onFinish).toHaveBeenCalled();
+  });
+
+  it("keeps important-date form input visible when saving fails", async () => {
+    render(<WorkbenchDialogs
+      state={{ type: "importantDate", item: null }}
+      onClose={vi.fn()}
+      onSave={vi.fn().mockRejectedValue(new Error("磁盘暂时不可写"))}
+      onDelete={vi.fn()}
+    />);
+    await userEvent.type(screen.getByLabelText("日期名称"), "重要纪念日");
+    await userEvent.type(screen.getByLabelText("目标日期"), "2026-10-01");
+    await userEvent.click(screen.getByRole("button", { name: "保存重要日期" }));
+    expect(await screen.findByText("磁盘暂时不可写")).toBeInTheDocument();
+    expect(screen.getByLabelText("日期名称")).toHaveValue("重要纪念日");
   });
 });
