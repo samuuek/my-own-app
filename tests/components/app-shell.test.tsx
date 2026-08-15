@@ -10,10 +10,10 @@ import { SettingsPage } from "../../src/pages/SettingsPage";
 const collections = ["planItems", "importantDates", "longTermGoals", "focusTimers", "quickMemos", "mediaContents", "devProjects", "devMilestones", "devWorkItems", "devLogs", "clients", "consultingProjects", "consultingInteractions", "consultingDeliverables", "consultingFollowups", "consultingTimeEntries", "workoutTemplates", "workoutTemplateExercises", "workouts", "workoutExercises", "workoutSets", "bodyMetrics", "nutritionTargets", "foods", "meals", "mealItems", "entertainmentItems", "playSessions", "books", "readingSessions", "readingNotes", "dailyReflections", "reflectionActions", "thoughtNotes"];
 
 function mockApi(theme = "light", backupStatus: Record<string, any> | null = null, appearance?: unknown) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     let data: any = null;
-    if (url.startsWith("/api/state")) data = { ...Object.fromEntries(collections.map((name) => [name, []])), settings: { theme, ...(appearance === undefined ? {} : { appearance }) }, trash: [] };
+    if (url.startsWith("/api/state")) data = { ...Object.fromEntries(collections.map((name) => [name, []])), settings: { theme, progressWorkbenchOnboarding: "skipped", ...(appearance === undefined ? {} : { appearance }) }, trash: [] };
     else if (url.startsWith("/api/dashboard")) data = { date: "2026-08-02", overview: { completed: 0, total: 0, progress: 0, scheduledMinutes: 0 }, timeline: [], unscheduled: [], importantDates: [], longTermGoals: [], activeFocusTimer: null, sectionErrors: {}, attention: [], summaries: { media: [], development: [], consulting: [], fitness: [], diet: [], entertainment: [] } };
     else if (url.startsWith("/api/system/status")) data = {
       latestBackup: null,
@@ -24,6 +24,7 @@ function mockApi(theme = "light", backupStatus: Record<string, any> | null = nul
       exportsDirectory: "C:/test/exports",
     };
     else if (url.startsWith("/api/system/save")) data = { savedAt: "2026-08-02T12:00:00.000Z", database: "ok", dataFile: "/tmp/app.sqlite" };
+    else if (url === "/api/settings" && init?.method === "PUT") data = JSON.parse(String(init.body));
     return { ok: true, status: 200, json: async () => ({ data }) } as Response;
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -119,6 +120,17 @@ describe("application shell", () => {
     expect(screen.getByRole("button", { name: "Liquid Glass" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Notion 笔记" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Neo-Brutalism" })).toBeInTheDocument();
+  });
+
+  it("saves pending onboarding state when reopening it from settings", async () => {
+    const fetchMock = mockApi("light", null, "ios");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<MemoryRouter><QueryClientProvider client={client}><WorkspaceProvider><SettingsPage /></WorkspaceProvider></QueryClientProvider></MemoryRouter>);
+    await userEvent.click(await screen.findByRole("button", { name: "重新查看新手引导" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ progressWorkbenchOnboarding: "pending" }) }),
+    ));
   });
 
   it("shows save failure instead of a false saved state", async () => {

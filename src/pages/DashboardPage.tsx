@@ -12,6 +12,7 @@ import { ImportantDatesPanel } from "../features/workbench/ImportantDatesPanel";
 import { LongTermGoalsPanel } from "../features/workbench/LongTermGoalsPanel";
 import { FocusTimerPanel } from "../features/workbench/FocusTimerPanel";
 import { WorkbenchDialogs, type WorkbenchDialogState } from "../features/workbench/WorkbenchDialogs";
+import { OnboardingModal } from "../features/workbench/OnboardingModal";
 import type { CollectionName, Entity } from "../types";
 
 const summaryMeta: Record<string, { title: string; route: string; module: ModuleArtworkName; empty: string }> = {
@@ -73,6 +74,7 @@ export function DashboardPage() {
   const unscheduled = value.unscheduled ?? [];
   const allTodayItems = [...timeline, ...unscheduled];
   const activeFocusTimer = value.activeFocusTimer ?? null;
+  const shouldOpenOnboarding = !["completed", "skipped"].includes(data.settings.progressWorkbenchOnboarding);
   const activeFocusTask = activeFocusTimer?.plan_item_id
     ? allTodayItems.find((item) => item.id === activeFocusTimer.plan_item_id) ?? data.planItems.find((item) => item.id === activeFocusTimer.plan_item_id)
     : null;
@@ -157,6 +159,13 @@ export function DashboardPage() {
         })}</div>
       </Section>
       <WorkbenchDialogs state={workbenchDialog} onClose={() => setWorkbenchDialog(null)} onSave={saveWorkbench} onDelete={async (collection, item) => { await run(() => api.remove(collection, item.id)); }} />
+      <OnboardingModal
+        open={shouldOpenOnboarding}
+        onSkip={async () => { await run(() => api.saveSettings({ progressWorkbenchOnboarding: "skipped" })); }}
+        onComplete={async () => { await run(() => api.saveSettings({ progressWorkbenchOnboarding: "completed" })); }}
+        onCreateImportantDate={async (input) => { await run(() => api.create("importantDates", { ...input, sort_order: importantDates.length })); }}
+        onCreateGoal={async (input) => { await run(() => api.create("longTermGoals", { ...input, sort_order: longTermGoals.length })); }}
+      />
     </div>
   );
 }
