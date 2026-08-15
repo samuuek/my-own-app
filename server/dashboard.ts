@@ -1,5 +1,6 @@
 import type { AppStore, Entity } from "./store.js";
 import { resolveImportantDate } from "./workbench.js";
+import type { FocusTimerSnapshot } from "./focus-timer.js";
 
 function plusDays(date: string, days: number): string {
   const value = new Date(`${date}T12:00:00`);
@@ -7,7 +8,11 @@ function plusDays(date: string, days: number): string {
   return value.toISOString().slice(0, 10);
 }
 
-export function buildDashboard(store: AppStore, date: string): Record<string, any> {
+export function buildDashboard(
+  store: AppStore,
+  date: string,
+  readActiveFocusTimer: () => FocusTimerSnapshot | null = () => null,
+): Record<string, any> {
   const planItems: Entity[] = store.list("planItems").map((item) => ({
     ...item,
     display_title: store.sourceTitle(item.source_entity_type, item.source_entity_id) || item.title,
@@ -72,6 +77,7 @@ export function buildDashboard(store: AppStore, date: string): Record<string, an
   const longTermGoals = safeSection("longTermGoals", [] as Entity[], () => store
     .list("longTermGoals")
     .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)));
+  const activeFocusTimer = safeSection("focusTimer", null as FocusTimerSnapshot | null, readActiveFocusTimer);
 
   return {
     date,
@@ -85,7 +91,7 @@ export function buildDashboard(store: AppStore, date: string): Record<string, an
     unscheduled,
     importantDates,
     longTermGoals,
-    activeFocusTimer: null,
+    activeFocusTimer,
     sectionErrors,
     attention: attention.slice(0, 12),
     summaries: {

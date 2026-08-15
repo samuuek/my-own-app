@@ -51,6 +51,29 @@ describe("dashboard and daily planning", () => {
     expect(response.json().data.longTermGoals.map((item: any) => item.name)).toEqual(["第一目标", "第二目标"]);
   });
 
+  it("exposes one recoverable focus timer through the dashboard", async () => {
+    const task = await create("planItems", { title: "专注测试", plan_date: "2026-08-15", estimated_minutes: 25 });
+    const started = await app.inject({ method: "POST", url: "/api/focus-timers", payload: { planItemId: task.id, plannedMinutes: 25 } });
+    expect(started.statusCode).toBe(201);
+    expect(started.json().data).toMatchObject({ plan_item_id: task.id, status: "running" });
+
+    const duplicate = await app.inject({ method: "POST", url: "/api/focus-timers", payload: { planItemId: null, plannedMinutes: 10 } });
+    expect(duplicate.statusCode).toBe(400);
+
+    let dashboard = await app.inject({ method: "GET", url: "/api/dashboard?date=2026-08-15" });
+    expect(dashboard.json().data.activeFocusTimer.id).toBe(started.json().data.id);
+
+    const paused = await app.inject({ method: "POST", url: `/api/focus-timers/${started.json().data.id}/pause` });
+    expect(paused.json().data.status).toBe("paused");
+    const resumed = await app.inject({ method: "POST", url: `/api/focus-timers/${started.json().data.id}/resume` });
+    expect(resumed.json().data.status).toBe("running");
+    const finished = await app.inject({ method: "POST", url: `/api/focus-timers/${started.json().data.id}/finish`, payload: { status: "completed" } });
+    expect(finished.json().data.status).toBe("completed");
+
+    dashboard = await app.inject({ method: "GET", url: "/api/dashboard?date=2026-08-15" });
+    expect(dashboard.json().data.activeFocusTimer).toBeNull();
+  });
+
   it("postpones items and saves the daily review", async () => {
     const item = await create("planItems", { title: "需要延期", plan_date: "2026-08-02" });
     const postponed = await app.inject({ method: "POST", url: `/api/plan-items/${item.id}/postpone`, payload: { date: "2026-08-03" } });

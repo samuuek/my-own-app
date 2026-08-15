@@ -13,6 +13,7 @@ import { buildDashboard } from "./dashboard.js";
 import { collectionDefinitions, isCollectionName, sourceCollectionByType } from "./collections.js";
 import { openPathCommand } from "./platform.js";
 import { ReadingFileManager } from "./reading-files.js";
+import { FocusTimerService } from "./focus-timer.js";
 
 const bodySchema = z.record(z.string(), z.unknown());
 
@@ -30,6 +31,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const store = new AppStore(manager);
   const backups = new BackupManager(manager, store, paths);
   const readingFiles = new ReadingFileManager(paths, store);
+  const focusTimers = new FocusTimerService(store);
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 * 1024 * 1024 });
   app.addContentTypeParser("application/pdf", { parseAs: "buffer", bodyLimit: 100 * 1024 * 1024 }, (_request, body, done) => done(null, body));
   for (const type of ["image/png", "image/jpeg", "image/webp"]) app.addContentTypeParser(type, { parseAs: "buffer", bodyLimit: 10 * 1024 * 1024 }, (_request, body, done) => done(null, body));
@@ -70,7 +72,33 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   app.get("/api/dashboard", async (request) => {
     const query = request.query as { date?: string };
     const date = query.date && /^\d{4}-\d{2}-\d{2}$/.test(query.date) ? query.date : localDate();
-    return { data: buildDashboard(store, date) };
+    return { data: buildDashboard(store, date, () => focusTimers.current()) };
+  });
+
+  app.get("/api/focus-timers/current", async () => ({ data: focusTimers.current() }));
+
+  app.post("/api/focus-timers", async (request, reply) => {
+    const body = z.object({
+      planItemId: z.string().nullable().default(null),
+      plannedMinutes: z.number().int().min(1).max(480),
+    }).parse(request.body ?? {});
+    return reply.code(201).send({ data: focusTimers.start(body) });
+  });
+
+  app.post("/api/focus-timers/:id/pause", async (request) => {
+    const { id } = request.params as { id: string };
+    return { data: focusTimers.pause(id) };
+  });
+
+  app.post("/api/focus-timers/:id/resume", async (request) => {
+    const { id } = request.params as { id: string };
+    return { data: focusTimers.resume(id) };
+  });
+
+  app.post("/api/focus-timers/:id/finish", async (request) => {
+    const { id } = request.params as { id: string };
+    const body = z.object({ status: z.enum(["completed", "cancelled"]).default("completed") }).parse(request.body ?? {});
+    return { data: focusTimers.finish(id, body.status) };
   });
 
   app.get("/api/search", async (request) => {

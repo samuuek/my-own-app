@@ -1,4 +1,4 @@
-import type { CollectionName, WorkspaceState, DashboardData, BackupRecord, Entity } from "./types";
+import type { CollectionName, WorkspaceState, DashboardData, BackupRecord, Entity, FocusTimerSnapshot } from "./types";
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -23,6 +23,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   state: () => request<WorkspaceState>("/api/state"),
   dashboard: (date: string) => request<DashboardData>(`/api/dashboard?date=${encodeURIComponent(date)}`),
+  currentFocusTimer: () => request<FocusTimerSnapshot | null>("/api/focus-timers/current"),
+  startFocusTimer: (input: { planItemId: string | null; plannedMinutes: number }) =>
+    request<FocusTimerSnapshot>("/api/focus-timers", { method: "POST", body: JSON.stringify(input) }),
+  pauseFocusTimer: (id: string) => request<FocusTimerSnapshot>(`/api/focus-timers/${id}/pause`, { method: "POST" }),
+  resumeFocusTimer: (id: string) => request<FocusTimerSnapshot>(`/api/focus-timers/${id}/resume`, { method: "POST" }),
+  finishFocusTimer: (id: string, status: "completed" | "cancelled" = "completed") =>
+    request<FocusTimerSnapshot>(`/api/focus-timers/${id}/finish`, { method: "POST", body: JSON.stringify({ status }) }),
   search: (query: string) => request<Entity[]>(`/api/search?q=${encodeURIComponent(query)}`),
   create: (collection: CollectionName, input: Record<string, any>) =>
     request<Entity>(`/api/collections/${collection}`, { method: "POST", body: JSON.stringify(input) }),
