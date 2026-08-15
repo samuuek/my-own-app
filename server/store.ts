@@ -7,16 +7,10 @@ import {
 } from "./collections.js";
 import { calculateReadingStats, validateBookProgress } from "./reading.js";
 import { nextLocalDate, validateSourceCategory } from "./reflection.js";
+import { NotFoundError, ValidationError } from "./errors.js";
+import { validateWorkbenchEntity } from "./workbench.js";
 
 export type Entity = Record<string, any>;
-
-export class ValidationError extends Error {
-  statusCode = 400;
-}
-
-export class NotFoundError extends Error {
-  statusCode = 404;
-}
 
 export class AppStore {
   constructor(public readonly manager: DatabaseManager) {}
@@ -45,6 +39,13 @@ export class AppStore {
     const definition = collectionDefinitions[name];
     const clean = this.sanitize(name, input);
     this.requireFields(definition.required, clean);
+    validateWorkbenchEntity(name, null, clean);
+    if (name === "planItems" && clean.sort_order === undefined) {
+      const row = this.manager.db
+        .prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM plan_items WHERE plan_date = ? AND deleted_at IS NULL")
+        .get(clean.plan_date) as { next: number };
+      clean.sort_order = row.next;
+    }
     if (name === "books") validateBookProgress(Number(clean.current_page ?? 0), clean.total_pages == null ? null : Number(clean.total_pages));
     if (name === "dailyReflections" || name === "thoughtNotes") validateSourceCategory(clean.source_category);
     const now = new Date().toISOString();
@@ -59,10 +60,10 @@ export class AppStore {
 
   update(name: CollectionName, id: string, input: Entity): Entity {
     const definition = collectionDefinitions[name];
-    this.get(name, id, true);
+    const existing = this.get(name, id, true);
     const clean = this.sanitize(name, input);
+    validateWorkbenchEntity(name, existing, clean);
     if (name === "books") {
-      const existing = this.get(name, id, true);
       const currentPage = Number(clean.current_page ?? existing.current_page ?? 0);
       const totalPagesValue = clean.total_pages !== undefined ? clean.total_pages : existing.total_pages;
       validateBookProgress(currentPage, totalPagesValue == null ? null : Number(totalPagesValue));

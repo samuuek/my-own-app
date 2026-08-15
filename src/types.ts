@@ -2,6 +2,9 @@ export type Entity = Record<string, any> & { id: string };
 
 export type WorkspaceState = {
   planItems: Entity[];
+  importantDates: Entity[];
+  longTermGoals: Entity[];
+  focusTimers: Entity[];
   quickMemos: Entity[];
   mediaContents: Entity[];
   devProjects: Entity[];

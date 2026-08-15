@@ -100,13 +100,19 @@ describe("SQLite persistence and migrations", () => {
         "SELECT name, notes, body_part FROM workout_templates WHERE id = ?",
       ).get("existing-template") as { name: string; notes: string; body_part: string };
       const workoutColumns = upgradedManager.db.pragma("table_info(workouts)") as Array<{ name: string }>;
+      const planColumns = upgradedManager.db.pragma("table_info(plan_items)") as Array<{ name: string }>;
+      const workbenchTables = upgradedManager.db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('important_dates', 'long_term_goals', 'focus_timers') ORDER BY name",
+      ).all() as Array<{ name: string }>;
       const versions = upgradedManager.db.prepare(
         "SELECT version FROM schema_migrations ORDER BY version",
       ).all() as Array<{ version: string }>;
 
       expect(template).toEqual({ name: "原有训练模板", notes: "升级后不能丢失", body_part: "" });
       expect(workoutColumns.map((column) => column.name)).toContain("body_part");
-      expect(versions.at(-1)?.version).toBe("004_reflection_module.sql");
+      expect(planColumns.map((column) => column.name)).toContain("sort_order");
+      expect(workbenchTables.map((table) => table.name)).toEqual(["focus_timers", "important_dates", "long_term_goals"]);
+      expect(versions.at(-1)?.version).toBe("005_progress_workbench.sql");
     } finally {
       upgradedManager.close();
     }
