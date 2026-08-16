@@ -37,4 +37,9 @@ test("production HTML contains the local app entry point and no remote runtime a
   }
   assert.match(css, /:root\[data-appearance=neo\]/);
   assert.match(css, /\/assets\/neo\/module-emblems\.png/);
+  assert.match(css, /\.workbench-pair\{[^}]*display:grid[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(css, /data-appearance=ios[^}]*\.ios-shell \.workbench-overview/);
+  assert.match(css, /data-appearance=notebook[^}]*workbench-overview/);
+  assert.match(css, /\.neo-shell :is\(\.workbench-overview,\.workbench-panel\)/);
+  assert.match(css, /@media\(max-width:760px\)[^{]*\{[^}]*\.workbench-pair\{grid-template-columns:1fr/);
 });

@@ -21,7 +21,7 @@ describe("application health", () => {
         buildId: "development",
         status: "ok",
         database: "ok",
-        schemaVersion: "004_reflection_module.sql",
+        schemaVersion: "005_progress_workbench.sql",
       });
     } finally {
       await app.close();

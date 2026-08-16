@@ -766,6 +766,19 @@
 .neo-shell .dashboard-command-strip button:hover svg { color: var(--neo-accent); }
 
 .neo-shell .dashboard-grid { grid-template-columns: minmax(0, 1.8fr) minmax(300px, .72fr); gap: 30px; }
+.neo-shell :is(.workbench-overview, .workbench-panel) {
+  border: var(--neo-line-heavy);
+  border-radius: 1px;
+  background: var(--neo-sheet);
+  box-shadow: 7px 7px 0 var(--neo-shadow);
+  backdrop-filter: none;
+}
+.neo-shell .workbench-pair { gap: 26px; margin-bottom: 30px; }
+.neo-shell :is(.important-date-card, .long-term-goal-card, .focus-timer-content, .workbench-empty) { border: var(--neo-line); border-radius: 0; background: var(--neo-paper); box-shadow: none; }
+.neo-shell :is(.workbench-item-actions button, .plan-row-actions button) { border-radius: 0; }
+.neo-shell .progress-ring circle { stroke-width: 8; }
+.neo-shell .progress-ring-track { stroke: var(--neo-paper-deep); }
+.neo-shell .progress-ring-value { stroke: var(--neo-accent); }
 .neo-shell .dashboard-primary > .section { margin-bottom: 24px; }
 .neo-shell .dashboard-aside {
   top: 104px;
@@ -1099,6 +1112,7 @@
   .neo-shell .nav-link { flex: 0 0 auto; min-height: 36px; margin: 0; }
   .neo-shell .topbar { position: sticky; top: 0; }
   .neo-shell .dashboard-grid,
+  .neo-shell .workbench-pair,
   .neo-shell .fitness-grid,
   .neo-shell .settings-grid,
   .neo-shell .consult-layout,
