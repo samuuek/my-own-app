@@ -11,7 +11,11 @@ CREATE TABLE IF NOT EXISTS workspace_entities (
   updated_at timestamptz NOT NULL,
   deleted_at timestamptz,
   PRIMARY KEY (collection, id),
-  CHECK (payload->>'id' = id)
+  CHECK (
+    payload ? 'id'
+    AND jsonb_typeof(payload->'id') = 'string'
+    AND payload->>'id' = id
+  )
 );
 
 CREATE TABLE IF NOT EXISTS workspace_settings (
