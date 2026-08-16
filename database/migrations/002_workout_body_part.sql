@@ -1,2 +1,0 @@
-ALTER TABLE workout_templates ADD COLUMN body_part TEXT NOT NULL DEFAULT '';
-ALTER TABLE workouts ADD COLUMN body_part TEXT NOT NULL DEFAULT '';
