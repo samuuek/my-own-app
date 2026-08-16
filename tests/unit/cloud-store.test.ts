@@ -76,6 +76,7 @@ describe("CloudStore validation and JSONB persistence", () => {
 
   it("assigns the next active sort order for the same plan date", async () => {
     const database = new RecordingDatabase((text, values) => {
+      if (text.includes("pg_advisory_xact_lock")) return { rows: [] };
       if (text.includes("AS next")) return { rows: [{ next: 4 }] };
       if (text.includes("INSERT INTO workspace_entities")) return payloadResult(values);
       return { rows: [] };
@@ -85,9 +86,19 @@ describe("CloudStore validation and JSONB persistence", () => {
     const plan = await store.create("planItems", { title: "下一项", plan_date: "2026-09-01" });
 
     expect(plan.sort_order).toBe(4);
-    const orderQuery = database.rootCalls.find((call) => call.text.includes("AS next"));
+    expect(database.transactions).toBe(1);
+    expect(database.rootCalls).toHaveLength(0);
+    const lockQuery = database.transactionCalls.find((call) => call.text.includes("pg_advisory_xact_lock"));
+    expect(lockQuery?.values).toEqual(["planItems", "2026-09-01"]);
+    const orderQuery = database.transactionCalls.find((call) => call.text.includes("AS next"));
     expect(orderQuery?.values).toEqual(["planItems", "2026-09-01"]);
     expect(orderQuery?.text).toContain("deleted_at IS NULL");
+    expect(database.transactionCalls.map((call) =>
+      call.text.includes("pg_advisory_xact_lock") ? "lock"
+        : call.text.includes("AS next") ? "max"
+          : call.text.includes("INSERT INTO workspace_entities") ? "insert"
+            : "other"
+    )).toEqual(["lock", "max", "insert"]);
   });
 
   it("replaces a merged full payload and duplicates updated metadata in one statement", async () => {
@@ -110,7 +121,12 @@ describe("CloudStore validation and JSONB persistence", () => {
 
     expect(updated).toMatchObject({ id: "goal-1", name: "长期目标", progress: 60 });
     expect(updated).not.toHaveProperty("unknown");
-    const update = database.rootCalls.find((call) => call.text.includes("UPDATE workspace_entities"));
+    expect(database.transactions).toBe(1);
+    expect(database.rootCalls).toHaveLength(0);
+    const lockedRead = database.transactionCalls.find((call) => call.text.includes("SELECT payload"));
+    expect(lockedRead?.text).toContain("FOR UPDATE");
+    expect(lockedRead?.values).toEqual(["longTermGoals", "goal-1"]);
+    const update = database.transactionCalls.find((call) => call.text.includes("UPDATE workspace_entities"));
     expect(update?.text).toContain("payload = $3::jsonb");
     expect(update?.text).toContain("updated_at = $4::timestamptz");
     expect(update?.text).toContain("deleted_at = $5::timestamptz");
@@ -123,6 +139,17 @@ describe("CloudStore validation and JSONB persistence", () => {
 
     await expect(store.list("unsafe_table" as never)).rejects.toThrow("collection");
     expect(database.rootCalls).toHaveLength(0);
+  });
+
+  it("returns null only for a missing source and propagates query failures", async () => {
+    const missingDatabase = new RecordingDatabase(() => ({ rows: [] }));
+    await expect(new CloudStore(missingDatabase).sourceTitle("book", "missing")).resolves.toBeNull();
+
+    const failingDatabase = new RecordingDatabase(() => {
+      throw new Error("Neon unavailable");
+    });
+    await expect(new CloudStore(failingDatabase).sourceTitle("book", "book-1"))
+      .rejects.toThrow("Neon unavailable");
   });
 });
 

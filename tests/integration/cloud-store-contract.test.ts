@@ -36,6 +36,8 @@ class MemoryCloudDatabase implements Queryable {
   }
 
   async query<T>(text: string, values: unknown[] = []): Promise<QueryResult<T>> {
+    if (text.includes("pg_advisory_xact_lock")) return { rows: [] };
+
     if (text.includes("COALESCE(MAX") && text.includes("AS next")) {
       const [collection, planDate] = values as [string, string];
       const current = [...this.entities.values()]
@@ -102,6 +104,127 @@ class MemoryCloudDatabase implements Queryable {
     }
 
     throw new Error(`Unexpected SQL in memory contract: ${text}`);
+  }
+}
+
+type TransactionContext = {
+  locks: Set<string>;
+  releases: Array<() => void>;
+};
+
+class ConcurrentCloudDatabase implements Queryable {
+  private entities = new Map<string, StoredEntity>();
+  private lockTails = new Map<string, Promise<void>>();
+  private unlockedMaxWaiters = 0;
+  private releaseUnlockedMax!: () => void;
+  private readonly unlockedMaxBarrier = new Promise<void>((resolve) => { this.releaseUnlockedMax = resolve; });
+  private unlockedReadWaiters = 0;
+  private releaseUnlockedRead!: () => void;
+  private readonly unlockedReadBarrier = new Promise<void>((resolve) => { this.releaseUnlockedRead = resolve; });
+
+  seed(collection: string, payload: JsonEntity): void {
+    this.entities.set(`${collection}:${payload.id}`, {
+      collection,
+      id: payload.id,
+      payload: structuredClone(payload),
+      createdAt: payload.created_at,
+      updatedAt: payload.updated_at,
+      deletedAt: payload.deleted_at ?? null,
+    });
+  }
+
+  read(collection: string, id: string): JsonEntity | undefined {
+    const payload = this.entities.get(`${collection}:${id}`)?.payload;
+    return payload && structuredClone(payload);
+  }
+
+  async transaction<T>(work: (queryable: Queryable) => Promise<T>): Promise<T> {
+    const context: TransactionContext = { locks: new Set(), releases: [] };
+    try {
+      return await work({
+        query: <Row>(text: string, values: unknown[] = []) => this.run<Row>(context, text, values),
+      });
+    } finally {
+      for (const release of context.releases.reverse()) release();
+    }
+  }
+
+  query<T>(text: string, values: unknown[] = []): Promise<QueryResult<T>> {
+    return this.run<T>(null, text, values);
+  }
+
+  private async run<T>(context: TransactionContext | null, text: string, values: unknown[]): Promise<QueryResult<T>> {
+    if (text.includes("pg_advisory_xact_lock")) {
+      if (!context) throw new Error("advisory transaction lock used outside a transaction");
+      await this.acquire(context, `plan:${String(values[0])}:${String(values[1])}`);
+      return { rows: [] };
+    }
+
+    if (text.includes("COALESCE(MAX") && text.includes("AS next")) {
+      const [collection, planDate] = values as [string, string];
+      const lockKey = `plan:${collection}:${planDate}`;
+      if (!context?.locks.has(lockKey)) await this.waitForBothUnlockedMaxReaders();
+      const current = [...this.entities.values()]
+        .filter((row) => row.collection === collection && !row.deletedAt && row.payload.plan_date === planDate)
+        .map((row) => Number(row.payload.sort_order))
+        .filter(Number.isFinite);
+      return { rows: [{ next: current.length ? Math.max(...current) + 1 : 0 }] as T[] };
+    }
+
+    if (text.includes("INSERT INTO workspace_entities")) {
+      const [collection, id, rawPayload, createdAt, updatedAt] = values as [string, string, string, string, string];
+      const payload = JSON.parse(rawPayload);
+      this.entities.set(`${collection}:${id}`, { collection, id, payload, createdAt, updatedAt, deletedAt: null });
+      return { rows: [{ payload: structuredClone(payload) }] as T[] };
+    }
+
+    if (text.includes("SELECT payload") && text.includes("FROM workspace_entities")) {
+      const [collection, id] = values as [string, string];
+      const lockKey = `row:${collection}:${id}`;
+      if (text.includes("FOR UPDATE")) {
+        if (!context) throw new Error("row lock used outside a transaction");
+        await this.acquire(context, lockKey);
+      } else if (!context?.locks.has(lockKey)) {
+        await this.waitForBothUnlockedRowReaders();
+      }
+      const row = this.entities.get(`${collection}:${id}`);
+      return { rows: row ? [{ payload: structuredClone(row.payload) }] as T[] : [] };
+    }
+
+    if (text.includes("UPDATE workspace_entities")) {
+      const [collection, id, rawPayload, updatedAt, deletedAt] = values as [string, string, string, string, string | null];
+      const key = `${collection}:${id}`;
+      const current = this.entities.get(key);
+      if (!current) return { rows: [] };
+      const payload = JSON.parse(rawPayload);
+      this.entities.set(key, { ...current, payload, updatedAt, deletedAt });
+      return { rows: [{ payload: structuredClone(payload) }] as T[] };
+    }
+
+    throw new Error(`Unexpected concurrent SQL: ${text}`);
+  }
+
+  private async acquire(context: TransactionContext, key: string): Promise<void> {
+    if (context.locks.has(key)) return;
+    const previous = this.lockTails.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.lockTails.set(key, previous.then(() => current));
+    await previous;
+    context.locks.add(key);
+    context.releases.push(release);
+  }
+
+  private async waitForBothUnlockedMaxReaders(): Promise<void> {
+    this.unlockedMaxWaiters += 1;
+    if (this.unlockedMaxWaiters === 2) this.releaseUnlockedMax();
+    await this.unlockedMaxBarrier;
+  }
+
+  private async waitForBothUnlockedRowReaders(): Promise<void> {
+    this.unlockedReadWaiters += 1;
+    if (this.unlockedReadWaiters === 2) this.releaseUnlockedRead();
+    await this.unlockedReadBarrier;
   }
 }
 
@@ -210,5 +333,37 @@ describe("CloudStore desktop-compatible contract", () => {
     expect(books).toHaveLength(20);
     expect(books[0]).toMatchObject({ collection: "books", module: "reading", title: "Cloud Guide 21", id: "book-21" });
     expect(results.some((row) => row.collection === "quickMemos" && row.title === "cloud reminder")).toBe(true);
+  });
+
+  it("serializes automatic plan ordering within one plan date", async () => {
+    const store = new CloudStore(new ConcurrentCloudDatabase());
+
+    const plans = await Promise.all([
+      store.create("planItems", { title: "第一项", plan_date: "2026-09-01" }),
+      store.create("planItems", { title: "第二项", plan_date: "2026-09-01" }),
+    ]);
+
+    expect(plans.map((plan) => plan.sort_order).sort((left, right) => left - right)).toEqual([0, 1]);
+  });
+
+  it("serializes read-modify-write updates for one entity without losing distinct fields", async () => {
+    const database = new ConcurrentCloudDatabase();
+    database.seed("longTermGoals", {
+      id: "goal-1",
+      name: "长期目标",
+      progress: 0,
+      notes: "旧备注",
+      created_at: "2026-08-01T00:00:00.000Z",
+      updated_at: "2026-08-01T00:00:00.000Z",
+      deleted_at: null,
+    });
+    const store = new CloudStore(database);
+
+    await Promise.all([
+      store.update("longTermGoals", "goal-1", { progress: 60 }),
+      store.update("longTermGoals", "goal-1", { notes: "新备注" }),
+    ]);
+
+    expect(database.read("longTermGoals", "goal-1")).toMatchObject({ progress: 60, notes: "新备注" });
   });
 });

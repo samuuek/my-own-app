@@ -77,6 +77,11 @@ export class CloudStore {
     validateCloudCreate(name, clean);
 
     if (name === "planItems" && clean.sort_order === undefined) {
+      if (!this.transactionBound) return this.transaction((store) => store.create(name, input));
+      await this.queryable.query(
+        "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+        [name, String(clean.plan_date)],
+      );
       const result = await this.queryable.query<{ next: number | string }>(`
         SELECT COALESCE(MAX((payload->>'sort_order')::integer), -1) + 1 AS next
         FROM workspace_entities
@@ -104,7 +109,8 @@ export class CloudStore {
 
   async update(name: CollectionName, id: string, input: Entity): Promise<Entity> {
     assertCollectionName(name);
-    const existing = await this.get(name, id, true);
+    if (!this.transactionBound) return this.transaction((store) => store.update(name, id, input));
+    const existing = await this.getForUpdate(name, id, true);
     const clean = sanitizeCloudEntity(name, input);
     validateCloudUpdate(name, existing, clean);
     const payload = {
@@ -119,7 +125,7 @@ export class CloudStore {
   async softDelete(name: CollectionName, id: string): Promise<Entity> {
     assertCollectionName(name);
     return this.transaction(async (store) => {
-      const existing = await store.get(name, id);
+      const existing = await store.getForUpdate(name, id);
       const now = new Date().toISOString();
       return store.replacePayload(name, id, { ...existing, id, updated_at: now, deleted_at: now });
     });
@@ -128,7 +134,7 @@ export class CloudStore {
   async restore(name: CollectionName, id: string): Promise<Entity> {
     assertCollectionName(name);
     return this.transaction(async (store) => {
-      const existing = await store.get(name, id, true);
+      const existing = await store.getForUpdate(name, id, true);
       const now = new Date().toISOString();
       return store.replacePayload(name, id, { ...existing, id, updated_at: now, deleted_at: null });
     });
@@ -262,8 +268,9 @@ export class CloudStore {
     try {
       const row = await this.get(collection, id);
       return String(row[collectionDefinitions[collection].title] ?? "");
-    } catch {
-      return null;
+    } catch (error) {
+      if (error instanceof NotFoundError) return null;
+      throw error;
     }
   }
 
@@ -280,6 +287,18 @@ export class CloudStore {
   ): Promise<Entity[]> {
     const visibleParents = new Set((await this.list(parentCollection)).map((row) => String(row.id)));
     return rows.filter((row) => visibleParents.has(String(row[foreignKey])));
+  }
+
+  private async getForUpdate(name: CollectionName, id: string, includeDeleted = false): Promise<Entity> {
+    const result = await this.queryable.query<PayloadRow>(`
+      SELECT payload
+      FROM workspace_entities
+      WHERE collection = $1 AND id = $2${includeDeleted ? "" : " AND deleted_at IS NULL"}
+      FOR UPDATE
+    `, [name, id]);
+    const row = result.rows[0];
+    if (!row) throw new NotFoundError("没有找到这条记录");
+    return readPayload(row);
   }
 
   private async replacePayload(name: CollectionName, id: string, payload: Entity): Promise<Entity> {
