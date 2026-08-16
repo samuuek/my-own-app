@@ -289,7 +289,9 @@ export class CloudStore {
     return rows.filter((row) => visibleParents.has(String(row[foreignKey])));
   }
 
-  private async getForUpdate(name: CollectionName, id: string, includeDeleted = false): Promise<Entity> {
+  async getForUpdate(name: CollectionName, id: string, includeDeleted = false): Promise<Entity> {
+    assertCollectionName(name);
+    if (!this.transactionBound) throw new Error("CloudStore.getForUpdate requires an active transaction");
     const result = await this.queryable.query<PayloadRow>(`
       SELECT payload
       FROM workspace_entities

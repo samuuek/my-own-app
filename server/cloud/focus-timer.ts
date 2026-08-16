@@ -66,7 +66,7 @@ export class CloudFocusTimerService {
 
   async pause(id: string, now = new Date()): Promise<FocusTimerSnapshot> {
     return this.store.transaction(async (store) => {
-      const row = await store.get("focusTimers", id);
+      const row = await store.getForUpdate("focusTimers", id);
       if (row.status !== "running") throw new ValidationError("只有进行中的计时可以暂停");
       const updated = await store.update("focusTimers", id, {
         status: "paused",
@@ -78,7 +78,7 @@ export class CloudFocusTimerService {
 
   async resume(id: string, now = new Date()): Promise<FocusTimerSnapshot> {
     return this.store.transaction(async (store) => {
-      const row = await store.get("focusTimers", id);
+      const row = await store.getForUpdate("focusTimers", id);
       if (row.status !== "paused" || !row.paused_at) throw new ValidationError("只有暂停的计时可以继续");
       const extraPaused = Math.max(0, Math.floor((now.getTime() - Date.parse(row.paused_at)) / 1000));
       const updated = await store.update("focusTimers", id, {
@@ -96,7 +96,7 @@ export class CloudFocusTimerService {
     now = new Date(),
   ): Promise<FocusTimerSnapshot> {
     return this.store.transaction(async (store) => {
-      const row = await store.get("focusTimers", id);
+      const row = await store.getForUpdate("focusTimers", id);
       if (!["running", "paused"].includes(row.status)) throw new ValidationError("这个计时已经结束");
       const currentPause = row.status === "paused" && row.paused_at
         ? Math.max(0, Math.floor((now.getTime() - Date.parse(row.paused_at)) / 1000))

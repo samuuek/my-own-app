@@ -9,6 +9,7 @@ class MemoryFocusStore {
   readonly rows: Record<string, Entity[]> = { planItems: [], focusTimers: [] };
   transactions = 0;
   private nextId = 1;
+  private readonly lockTails = new Map<string, Promise<void>>();
 
   asCloudStore(): CloudStore {
     return {
@@ -18,18 +19,35 @@ class MemoryFocusStore {
       update: async () => { throw new Error("root update escaped transaction"); },
       transaction: async <T>(work: (store: CloudStore) => Promise<T>) => {
         this.transactions += 1;
-        return work(this.transactionStore());
+        const releases: Array<() => void> = [];
+        try {
+          return await work(this.transactionStore(releases));
+        } finally {
+          releases.reverse().forEach((release) => release());
+        }
       },
     } as unknown as CloudStore;
   }
 
-  private transactionStore(): CloudStore {
+  private transactionStore(releases: Array<() => void>): CloudStore {
+    const acquired = new Set<string>();
+    const lock = async (name: CollectionName, id: string) => {
+      const key = `${name}:${id}`;
+      if (acquired.has(key)) return;
+      releases.push(await this.acquire(key));
+      acquired.add(key);
+    };
+    const get = (name: CollectionName, id: string) => {
+      const row = (this.rows[name] ?? []).find((item) => item.id === id && !item.deleted_at);
+      if (!row) throw new Error("没有找到这条记录");
+      return { ...row };
+    };
     return {
       list: async (name: CollectionName) => [...(this.rows[name] ?? [])],
-      get: async (name: CollectionName, id: string) => {
-        const row = (this.rows[name] ?? []).find((item) => item.id === id && !item.deleted_at);
-        if (!row) throw new Error("没有找到这条记录");
-        return { ...row };
+      get: async (name: CollectionName, id: string) => get(name, id),
+      getForUpdate: async (name: CollectionName, id: string) => {
+        await lock(name, id);
+        return get(name, id);
       },
       create: async (name: CollectionName, input: Entity) => {
         await Promise.resolve();
@@ -44,12 +62,23 @@ class MemoryFocusStore {
         return { ...row };
       },
       update: async (name: CollectionName, id: string, input: Entity) => {
+        await lock(name, id);
         const index = (this.rows[name] ?? []).findIndex((item) => item.id === id);
         if (index < 0) throw new Error("没有找到这条记录");
         this.rows[name][index] = { ...this.rows[name][index], ...input };
         return { ...this.rows[name][index] };
       },
     } as unknown as CloudStore;
+  }
+
+  private async acquire(key: string): Promise<() => void> {
+    const previous = this.lockTails.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => hold);
+    this.lockTails.set(key, tail);
+    await previous;
+    return release;
   }
 }
 
@@ -104,5 +133,50 @@ describe("CloudFocusTimerService", () => {
     const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
     expect(rejected?.reason).toMatchObject({ statusCode: 400, message: "已有正在进行的专注计时" });
     expect(memory.rows.focusTimers.filter((item) => ["running", "paused"].includes(item.status))).toHaveLength(1);
+  });
+
+  it("serializes duplicate pause and resume transitions against locked state", async () => {
+    const memory = new MemoryFocusStore();
+    const service = new CloudFocusTimerService(memory.asCloudStore());
+    const timer = await service.start({ planItemId: null, plannedMinutes: 25 }, new Date("2026-08-15T04:00:00.000Z"));
+
+    const pauses = await Promise.allSettled([
+      service.pause(timer.id, new Date("2026-08-15T04:01:00.000Z")),
+      service.pause(timer.id, new Date("2026-08-15T04:02:00.000Z")),
+    ]);
+    expect(pauses.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(pauses.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { message: "只有进行中的计时可以暂停", statusCode: 400 },
+    });
+
+    const resumes = await Promise.allSettled([
+      service.resume(timer.id, new Date("2026-08-15T04:03:00.000Z")),
+      service.resume(timer.id, new Date("2026-08-15T04:04:00.000Z")),
+    ]);
+    expect(resumes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(resumes.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { message: "只有暂停的计时可以继续", statusCode: 400 },
+    });
+  });
+
+  it("allows only one competing finish outcome to commit", async () => {
+    const memory = new MemoryFocusStore();
+    const service = new CloudFocusTimerService(memory.asCloudStore());
+    const timer = await service.start({ planItemId: null, plannedMinutes: 25 }, new Date("2026-08-15T05:00:00.000Z"));
+
+    const finishes = await Promise.allSettled([
+      service.finish(timer.id, "completed", new Date("2026-08-15T05:05:00.000Z")),
+      service.finish(timer.id, "cancelled", new Date("2026-08-15T05:06:00.000Z")),
+    ]);
+
+    expect(finishes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(finishes.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { message: "这个计时已经结束", statusCode: 400 },
+    });
+    const successful = finishes.find((result) => result.status === "fulfilled");
+    expect(successful?.status).toBe("fulfilled");
+    if (successful?.status === "fulfilled") {
+      expect(memory.rows.focusTimers[0].status).toBe(successful.value.status);
+    }
   });
 });

@@ -154,6 +154,31 @@ describe("CloudStore validation and JSONB persistence", () => {
 });
 
 describe("CloudStore transaction binding", () => {
+  it("allows locked reads only through a transaction-bound store", async () => {
+    const active = {
+      id: "timer-1",
+      planned_minutes: 25,
+      started_at: "2026-08-15T01:00:00.000Z",
+      status: "running",
+    };
+    const database = new RecordingDatabase((text) => {
+      if (text.includes("SELECT payload")) return { rows: [{ payload: active }] };
+      return { rows: [] };
+    });
+    const store = new CloudStore(database);
+
+    await expect(store.getForUpdate("focusTimers", "timer-1"))
+      .rejects.toThrow("requires an active transaction");
+    const locked = await store.transaction((transactionStore) =>
+      transactionStore.getForUpdate("focusTimers", "timer-1"));
+
+    expect(locked).toEqual(active);
+    expect(database.transactions).toBe(1);
+    expect(database.rootCalls).toHaveLength(0);
+    expect(database.transactionCalls).toHaveLength(1);
+    expect(database.transactionCalls[0].text).toContain("FOR UPDATE");
+  });
+
   it("runs soft-delete metadata changes on the transaction queryable", async () => {
     const active = {
       id: "plan-1",
