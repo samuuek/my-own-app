@@ -16,6 +16,7 @@ describe("cloud workspace schema", () => {
       "workspace_daily_reviews",
       "PRIMARY KEY (collection, id)",
       "payload JSONB",
+      "jsonb_typeof(payload) = 'object'",
       "payload ? 'id'",
       "jsonb_typeof(payload->'id') = 'string'",
       "payload->>'id' = id",

@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS workspace_entities (
   deleted_at timestamptz,
   PRIMARY KEY (collection, id),
   CHECK (
-    payload ? 'id'
+    jsonb_typeof(payload) = 'object'
+    AND payload ? 'id'
     AND jsonb_typeof(payload->'id') = 'string'
     AND payload->>'id' = id
   )
