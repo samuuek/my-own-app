@@ -43,7 +43,15 @@ export async function verifyCloudData(options: VerificationOptions): Promise<Ver
   const pkg = validateMigrationPackage(options.pkg);
   const log = options.log ?? console.log;
   const entityResult = await options.queryable.query<EntityAggregateRow>(`
-    SELECT collection, COALESCE(jsonb_agg(payload ORDER BY id), '[]'::jsonb) AS items
+    SELECT collection, COALESCE(jsonb_agg(
+      jsonb_build_object(
+        'id', id,
+        'payload', payload,
+        'created_at', to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'updated_at', to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'deleted_at', CASE WHEN deleted_at IS NULL THEN NULL ELSE to_jsonb(to_char(deleted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) END
+      ) ORDER BY id
+    ), '[]'::jsonb) AS items
     FROM workspace_entities
     GROUP BY collection
     ORDER BY collection
@@ -62,7 +70,14 @@ export async function verifyCloudData(options: VerificationOptions): Promise<Ver
     FROM workspace_settings
   `);
   const reviewsResult = await options.queryable.query<ReviewAggregateRow>(`
-    SELECT COALESCE(jsonb_agg(payload ORDER BY review_date), '[]'::jsonb) AS reviews
+    SELECT COALESCE(jsonb_agg(
+      jsonb_build_object(
+        'review_date', review_date::text,
+        'payload', payload,
+        'created_at', to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'updated_at', to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+      ) ORDER BY review_date
+    ), '[]'::jsonb) AS reviews
     FROM workspace_daily_reviews
   `);
 
@@ -71,13 +86,13 @@ export async function verifyCloudData(options: VerificationOptions): Promise<Ver
     if (!Object.hasOwn(collectionDefinitions, row.collection)) throw new Error("云端包含未知集合，核验不一致");
     const items = parseJsonValue(row.items);
     if (!Array.isArray(items)) throw new Error("云端集合聚合结果无效");
-    collections[row.collection as CollectionName] = items as MigrationEntity[];
+    collections[row.collection as CollectionName] = items.map(readPhysicalEntity);
   }
   const settingsRow = settingsResult.rows[0];
   const reviewRow = reviewsResult.rows[0];
   const settings = parseRecord(settingsRow?.settings ?? {});
   const settingUpdatedAt = parseStringRecord(settingsRow?.setting_updated_at ?? {});
-  const dailyReviews = parseArray(reviewRow?.reviews ?? []) as MigrationPackage["dailyReviews"];
+  const dailyReviews = parseArray(reviewRow?.reviews ?? []).map(readPhysicalReview) as MigrationPackage["dailyReviews"];
   const counts = Object.fromEntries(collectionNames.map((name) => [name, countRows(collections[name])])) as Record<CollectionName, MigrationCount>;
 
   for (const name of collectionNames) {
@@ -86,7 +101,7 @@ export async function verifyCloudData(options: VerificationOptions): Promise<Ver
   }
 
   const countMismatch = collectionNames.some((name) => !sameCount(counts[name], pkg.counts[name]));
-  const actualHash = calculatePackageHash({ collections, settings, settingUpdatedAt, dailyReviews });
+  const actualHash = calculatePackageHash({ collections, settings, settingUpdatedAt, dailyReviews, attachments: pkg.attachments });
   if (countMismatch || actualHash !== pkg.manifest.sha256) throw new Error("云端迁移核验不一致");
   return { sha256: actualHash, counts };
 }
@@ -116,6 +131,28 @@ function parseArray(value: unknown): unknown[] {
   const parsed = parseJsonValue(value);
   if (!Array.isArray(parsed)) throw new Error("云端每日回顾聚合结果无效");
   return parsed;
+}
+
+function readPhysicalEntity(value: unknown): MigrationEntity {
+  const row = parseRecord(value);
+  const payload = parseRecord(row.payload);
+  if (typeof row.id !== "string" || typeof row.created_at !== "string" || typeof row.updated_at !== "string"
+    || (row.deleted_at !== null && typeof row.deleted_at !== "string")) throw new Error("云端实体物理列无效，核验不一致");
+  if (payload.id !== row.id || payload.created_at !== row.created_at || payload.updated_at !== row.updated_at
+    || (payload.deleted_at ?? null) !== row.deleted_at) throw new Error("云端实体物理列与载荷不一致");
+  return payload as MigrationEntity;
+}
+
+function readPhysicalReview(value: unknown): MigrationPackage["dailyReviews"][number] {
+  const row = parseRecord(value);
+  const payload = parseRecord(row.payload);
+  if (typeof row.review_date !== "string" || typeof row.created_at !== "string" || typeof row.updated_at !== "string") {
+    throw new Error("云端每日回顾物理列无效，核验不一致");
+  }
+  if (payload.review_date !== row.review_date || payload.created_at !== row.created_at || payload.updated_at !== row.updated_at) {
+    throw new Error("云端每日回顾物理列与载荷不一致");
+  }
+  return payload as MigrationPackage["dailyReviews"][number];
 }
 
 function countRows(rows: MigrationEntity[]): MigrationCount {

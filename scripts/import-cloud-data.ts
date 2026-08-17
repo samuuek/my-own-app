@@ -1,13 +1,12 @@
-import { createHash } from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { put } from "@vercel/blob";
+import { BlobNotFoundError, del, head, put } from "@vercel/blob";
 import { collectionDefinitions, type CollectionName } from "../server/collections.js";
 import { readCloudConfig } from "../server/cloud/config.js";
 import { CloudDatabase, type Queryable } from "../server/cloud/database.js";
 import {
   readMigrationPackage,
+  readValidatedAttachment,
   validateMigrationPackage,
   type MigrationAttachment,
   type MigrationCount,
@@ -27,6 +26,8 @@ type PrivateUploadOptions = {
 
 export type MigrationUploader = {
   upload(pathname: string, content: Buffer, options: PrivateUploadOptions): Promise<void>;
+  exists(pathname: string): Promise<boolean>;
+  delete(pathname: string): Promise<void>;
 };
 
 export type ImportCloudDataOptions = {
@@ -50,6 +51,18 @@ const defaultUploader: MigrationUploader = {
   upload: async (pathname, content, options) => {
     await put(pathname, content, options);
   },
+  exists: async (pathname) => {
+    try {
+      await head(pathname);
+      return true;
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) return false;
+      throw error;
+    }
+  },
+  delete: async (pathname) => {
+    await del(pathname);
+  },
 };
 
 export async function importCloudData(options: ImportCloudDataOptions): Promise<ImportCloudDataResult> {
@@ -63,12 +76,15 @@ export async function importCloudData(options: ImportCloudDataOptions): Promise<
   };
   if (options.dryRun) return result;
 
-  if (pkg.attachments.length > 0) {
-    if (!options.attachmentsDirectory) throw new Error("迁移包包含附件；必须显式指定附件目录");
-    await uploadAttachments(pkg.attachments, options.attachmentsDirectory, options.uploader ?? defaultUploader);
-  }
+  const uploader = options.uploader ?? defaultUploader;
+  const newlyUploaded: string[] = [];
+  try {
+    if (pkg.attachments.length > 0) {
+      if (!options.attachmentsDirectory) throw new Error("迁移包包含附件；必须显式指定附件目录");
+      newlyUploaded.push(...await uploadAttachments(pkg.attachments, options.attachmentsDirectory, uploader));
+    }
 
-  await options.database.transaction(async (transaction) => {
+    await options.database.transaction(async (transaction) => {
     for (const name of collectionNames) {
       for (const entity of pkg.collections[name]) {
         await transaction.query(`
@@ -103,7 +119,15 @@ export async function importCloudData(options: ImportCloudDataOptions): Promise<
           updated_at = EXCLUDED.updated_at
       `, [review.review_date, JSON.stringify(review), review.created_at, review.updated_at]);
     }
-  });
+    });
+  } catch (error) {
+    const partialUploads = error instanceof Error && Array.isArray((error as Error & { newlyUploaded?: unknown }).newlyUploaded)
+      ? (error as Error & { newlyUploaded: string[] }).newlyUploaded
+      : [];
+    const cleanupPaths = [...new Set([...newlyUploaded, ...partialUploads])];
+    if (cleanupPaths.length > 0) await preserveCleanupIntent(options.database, uploader, cleanupPaths);
+    throw error;
+  }
   return result;
 }
 
@@ -111,30 +135,62 @@ async function uploadAttachments(
   attachments: MigrationAttachment[],
   attachmentsDirectory: string,
   uploader: MigrationUploader,
-): Promise<void> {
-  const root = path.resolve(attachmentsDirectory);
+): Promise<string[]> {
   const prepared = attachments.map((attachment) => {
-    if (path.basename(attachment.fileId) !== attachment.fileId) throw new Error("附件路径无效");
-    const sourcePath = path.resolve(root, attachment.fileId);
-    if (path.dirname(sourcePath) !== root) throw new Error("附件路径超出显式目录");
-    const content = fs.readFileSync(sourcePath);
-    if (content.byteLength !== attachment.size || sha256(content) !== attachment.sha256) {
-      throw new Error(`附件校验失败：${attachment.fileId}`);
-    }
+    const { content } = readValidatedAttachment({
+      attachmentsDirectory,
+      fileId: attachment.fileId,
+      kind: attachment.kind,
+      contentType: attachment.contentType,
+      expectedSize: attachment.size,
+      expectedSha256: attachment.sha256,
+    });
     return { attachment, content };
   });
+  const newlyUploaded: string[] = [];
   for (const { attachment, content } of prepared) {
-    await uploader.upload(`reading/books/${attachment.bookId}/${attachment.fileId}`, content, {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      contentType: attachment.contentType,
-    });
+    const existed = await uploader.exists(attachment.pathname);
+    try {
+      await uploader.upload(attachment.pathname, content, {
+        access: "private",
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: attachment.contentType,
+      });
+      if (!existed) newlyUploaded.push(attachment.pathname);
+    } catch (error) {
+      if (!existed && await uploader.exists(attachment.pathname)) newlyUploaded.push(attachment.pathname);
+      throw Object.assign(error instanceof Error ? error : new Error("附件上传失败"), { newlyUploaded });
+    }
   }
+  return newlyUploaded;
 }
 
-function sha256(content: Buffer): string {
-  return createHash("sha256").update(content).digest("hex");
+async function preserveCleanupIntent(
+  database: MigrationCloudDatabase,
+  uploader: MigrationUploader,
+  pathnames: string[],
+): Promise<void> {
+  for (const pathname of pathnames) {
+    try {
+      await database.query(`
+        INSERT INTO workspace_blob_cleanup(pathname, reason, state, attempts, last_error, next_attempt_at)
+        VALUES ($1, $2, 'pending', 0, NULL, now())
+        ON CONFLICT(pathname) DO UPDATE SET
+          reason = EXCLUDED.reason,
+          state = 'pending',
+          attempts = 0,
+          last_error = NULL,
+          next_attempt_at = now()
+      `, [pathname, "migration-rollback"]);
+    } catch (outboxError) {
+      try {
+        await uploader.delete(pathname);
+      } catch (deleteError) {
+        throw new AggregateError([outboxError, deleteError], `迁移失败且附件清理需要人工处理：${pathname}`);
+      }
+    }
+  }
 }
 
 function parseArguments(argv: string[]): Record<string, string | boolean> {

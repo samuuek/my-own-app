@@ -22,6 +22,7 @@ export type MigrationAttachment = {
   bookId: string;
   kind: "pdf" | "cover";
   fileId: string;
+  pathname: string;
   filename: string;
   size: number;
   sha256: string;
@@ -47,7 +48,7 @@ export type MigrationPackage = {
   attachments: MigrationAttachment[];
 };
 
-type CanonicalMigrationContent = Pick<MigrationPackage, "collections" | "settings" | "settingUpdatedAt" | "dailyReviews">;
+type CanonicalMigrationContent = Pick<MigrationPackage, "collections" | "settings" | "settingUpdatedAt" | "dailyReviews" | "attachments">;
 
 export type ExportMigrationOptions = {
   databasePath: string;
@@ -62,12 +63,18 @@ const collectionNames = Object.keys(collectionDefinitions) as CollectionName[];
 export function exportMigrationPackage(options: ExportMigrationOptions): MigrationPackage {
   const databasePath = path.resolve(requireNonEmpty(options.databasePath, "必须指定 SQLite 备份路径"));
   const outputPath = path.resolve(requireNonEmpty(options.outputPath, "必须指定迁移包输出路径"));
+  assertDistinctOutput(databasePath, outputPath);
+  const sourceHashBefore = hashFile(databasePath);
+  let collections!: Record<CollectionName, MigrationEntity[]>;
+  let settings!: Record<string, unknown>;
+  let settingUpdatedAt!: Record<string, string>;
+  let dailyReviews!: MigrationPackage["dailyReviews"];
   const database = new Database(databasePath, { readonly: true, fileMustExist: true });
   try {
     const integrity = String(database.pragma("integrity_check", { simple: true }));
     if (integrity !== "ok") throw new Error("SQLite 备份完整性检查失败");
 
-    const collections = Object.fromEntries(collectionNames.map((name) => {
+    collections = Object.fromEntries(collectionNames.map((name) => {
       const table = collectionDefinitions[name].table;
       const rows = database.prepare(`SELECT * FROM ${table} ORDER BY id`).all() as MigrationEntity[];
       return [name, rows.map(normalizeEntity)];
@@ -78,40 +85,44 @@ export function exportMigrationPackage(options: ExportMigrationOptions): Migrati
       value: string;
       updated_at: string;
     }>;
-    const settings: Record<string, unknown> = {};
-    const settingUpdatedAt: Record<string, string> = {};
+    settings = {};
+    settingUpdatedAt = {};
     for (const row of settingRows) {
       settings[row.key] = parseSetting(row.value);
       settingUpdatedAt[row.key] = row.updated_at;
     }
 
-    const dailyReviews = (database.prepare("SELECT * FROM daily_reviews ORDER BY review_date").all() as MigrationPackage["dailyReviews"])
+    dailyReviews = (database.prepare("SELECT * FROM daily_reviews ORDER BY review_date").all() as MigrationPackage["dailyReviews"])
       .map((row) => ({ ...row }));
-    const canonicalContent = canonicalMigrationContent({ collections, settings, settingUpdatedAt, dailyReviews });
-    const attachments = collectAttachments(collections.books, options.attachmentsDirectory);
-    const counts = Object.fromEntries(collectionNames.map((name) => [name, countRows(collections[name])])) as Record<CollectionName, MigrationCount>;
-    const pkg: MigrationPackage = {
-      manifest: {
-        formatVersion: 1,
-        sourceIntegrity: "ok",
-        exportedAt: (options.now ?? (() => new Date()))().toISOString(),
-        sha256: sha256(canonicalJson(canonicalContent)),
-      },
-      collections,
-      settings,
-      settingUpdatedAt,
-      dailyReviews,
-      counts,
-      attachments,
-    };
-    if (!options.dryRun) {
-      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-      fs.writeFileSync(outputPath, `${JSON.stringify(pkg, null, 2)}\n`, { encoding: "utf8", flag: "w" });
-    }
-    return pkg;
   } finally {
     database.close();
   }
+  const attachments = collectAttachments(collections.books, options.attachmentsDirectory);
+  applyCloudAttachmentPaths(collections.books, attachments);
+  if (hashFile(databasePath) !== sourceHashBefore) throw new Error("SQLite 备份在导出期间发生变化，已停止迁移");
+  const counts = Object.fromEntries(collectionNames.map((name) => [name, countRows(collections[name])])) as Record<CollectionName, MigrationCount>;
+  const pkg: MigrationPackage = {
+    manifest: {
+      formatVersion: 1,
+      sourceIntegrity: "ok",
+      exportedAt: (options.now ?? (() => new Date()))().toISOString(),
+      sha256: "",
+    },
+    collections,
+    settings,
+    settingUpdatedAt,
+    dailyReviews,
+    counts,
+    attachments,
+  };
+  pkg.manifest.sha256 = calculatePackageHash(pkg);
+  if (!options.dryRun) {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    assertDistinctOutput(databasePath, outputPath);
+    fs.writeFileSync(outputPath, `${JSON.stringify(pkg, null, 2)}\n`, { encoding: "utf8", flag: "w" });
+    if (hashFile(databasePath) !== sourceHashBefore) throw new Error("SQLite 备份在导出期间发生变化，已停止迁移");
+  }
+  return pkg;
 }
 
 export function readMigrationPackage(inputPath: string): MigrationPackage {
@@ -129,7 +140,12 @@ export function validateMigrationPackage(input: unknown): MigrationPackage {
   for (const name of collectionNames) {
     const rows = input.collections[name];
     if (!Array.isArray(rows)) throw new Error(`迁移包缺少集合 ${name}`);
-    for (const row of rows) validateEntity(name, row);
+    const ids = new Set<string>();
+    for (const row of rows) {
+      validateEntity(name, row);
+      if (ids.has(row.id)) throw new Error(`迁移包集合 ${name} 包含重复实体 ID`);
+      ids.add(row.id);
+    }
     const expected = countRows(rows as MigrationEntity[]);
     if (!sameCount(input.counts[name], expected)) throw new Error(`迁移包集合 ${name} 计数无效`);
   }
@@ -139,7 +155,13 @@ export function validateMigrationPackage(input: unknown): MigrationPackage {
     if (!Object.hasOwn(settings, key) || typeof updatedAt !== "string") throw new Error("迁移包设置时间无效");
   }
   if (Object.keys(settings).some((key) => typeof settingUpdatedAt[key] !== "string")) throw new Error("迁移包设置时间无效");
-  for (const review of input.dailyReviews) validateDailyReview(review);
+  const reviewDates = new Set<string>();
+  for (const review of input.dailyReviews) {
+    validateDailyReview(review);
+    const reviewDate = (review as { review_date: string }).review_date;
+    if (reviewDates.has(reviewDate)) throw new Error("迁移包包含重复每日回顾日期");
+    reviewDates.add(reviewDate);
+  }
   for (const attachment of input.attachments) validateAttachment(attachment);
   validateAttachmentManifest(
     input.collections.books as MigrationEntity[],
@@ -153,12 +175,12 @@ export function validateMigrationPackage(input: unknown): MigrationPackage {
   return pkg;
 }
 
-export function calculatePackageHash(pkg: Pick<MigrationPackage, "collections" | "settings" | "settingUpdatedAt" | "dailyReviews">): string {
+export function calculatePackageHash(pkg: Pick<MigrationPackage, "collections" | "settings" | "settingUpdatedAt" | "dailyReviews" | "attachments">): string {
   return sha256(canonicalJson(canonicalMigrationContent(pkg)));
 }
 
 export function canonicalMigrationContent(
-  input: Pick<MigrationPackage, "collections" | "settings" | "settingUpdatedAt" | "dailyReviews">,
+  input: Pick<MigrationPackage, "collections" | "settings" | "settingUpdatedAt" | "dailyReviews" | "attachments">,
 ): CanonicalMigrationContent {
   const collections = Object.fromEntries(collectionNames.map((name) => [
     name,
@@ -169,6 +191,7 @@ export function canonicalMigrationContent(
     settings: stableValue(input.settings),
     settingUpdatedAt: stableValue(input.settingUpdatedAt) as Record<string, string>,
     dailyReviews: [...input.dailyReviews].map((row) => stableValue(row)).sort((left, right) => String(left.review_date).localeCompare(String(right.review_date))),
+    attachments: [...input.attachments].map((item) => stableValue(item)).sort((left, right) => String(left.pathname).localeCompare(String(right.pathname))),
   };
 }
 
@@ -179,21 +202,94 @@ function collectAttachments(books: MigrationEntity[], attachmentsDirectory?: str
   ].filter((item): item is { bookId: string; kind: "pdf" | "cover"; fileId: string; filename: string } => item !== null)));
   if (references.length === 0) return [];
   if (!attachmentsDirectory) throw new Error("备份包含阅读附件；必须显式指定附件目录");
-  const root = path.resolve(attachmentsDirectory);
   return references.map((reference) => {
-    if (path.basename(reference.fileId) !== reference.fileId) throw new Error("附件标识包含不安全路径");
-    const sourcePath = path.resolve(root, reference.fileId);
-    if (!isDirectChild(root, sourcePath)) throw new Error("附件路径超出显式目录");
-    const stat = fs.statSync(sourcePath, { throwIfNoEntry: false });
-    if (!stat?.isFile()) throw new Error(`迁移附件不存在：${reference.fileId}`);
-    const content = fs.readFileSync(sourcePath);
+    const contentType = attachmentContentType(reference.kind, reference.fileId);
+    const pathname = cloudAttachmentPath(reference.bookId, reference.fileId);
+    const inspected = readValidatedAttachment({
+      attachmentsDirectory,
+      fileId: reference.fileId,
+      kind: reference.kind,
+      contentType,
+    });
     return {
       ...reference,
-      size: content.byteLength,
-      sha256: sha256(content),
-      contentType: attachmentContentType(reference.kind, reference.fileId),
+      pathname,
+      size: inspected.content.byteLength,
+      sha256: inspected.sha256,
+      contentType,
     };
-  }).sort((left, right) => `${left.bookId}:${left.kind}`.localeCompare(`${right.bookId}:${right.kind}`));
+  }).sort((left, right) => left.pathname.localeCompare(right.pathname));
+}
+
+export function readValidatedAttachment(options: {
+  attachmentsDirectory: string;
+  fileId: string;
+  kind: "pdf" | "cover";
+  contentType: string;
+  expectedSize?: number;
+  expectedSha256?: string;
+}): { content: Buffer; sha256: string } {
+  if (!isSafePathSegment(options.fileId)) throw new Error("附件标识包含不安全路径");
+  if (options.contentType !== attachmentContentType(options.kind, options.fileId)) throw new Error("附件类型与文件格式不一致");
+  const root = path.resolve(options.attachmentsDirectory);
+  const rootInfo = fs.lstatSync(root, { throwIfNoEntry: false });
+  if (!rootInfo?.isDirectory() || rootInfo.isSymbolicLink()) throw new Error("附件目录不能是符号链接或联接目录");
+  const realRoot = fs.realpathSync.native(root);
+  const sourcePath = path.resolve(root, options.fileId);
+  const sourceInfo = fs.lstatSync(sourcePath, { throwIfNoEntry: false });
+  if (!sourceInfo?.isFile() || sourceInfo.isSymbolicLink()) throw new Error(`迁移附件不是普通文件：${options.fileId}`);
+  const realSource = fs.realpathSync.native(sourcePath);
+  if (path.dirname(realSource) !== realRoot) throw new Error("附件路径超出显式目录");
+
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  const handle = fs.openSync(sourcePath, flags);
+  try {
+    const openedInfo = fs.fstatSync(handle);
+    const maximum = options.kind === "pdf" ? 100 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (openedInfo.size <= 0 || openedInfo.size > maximum) throw new Error(options.kind === "pdf" ? "PDF 文件不能超过 100 MB" : "封面图片不能超过 10 MB");
+    if (options.expectedSize !== undefined && openedInfo.size !== options.expectedSize) throw new Error(`附件校验失败：${options.fileId}`);
+    const content = Buffer.allocUnsafe(openedInfo.size);
+    let offset = 0;
+    while (offset < content.byteLength) {
+      const bytesRead = fs.readSync(handle, content, offset, content.byteLength - offset, offset);
+      if (bytesRead === 0) throw new Error(`附件读取不完整：${options.fileId}`);
+      offset += bytesRead;
+    }
+    assertAttachmentMagic(options.kind, options.contentType, content.subarray(0, 16));
+    const digest = sha256(content);
+    if (options.expectedSha256 !== undefined && digest !== options.expectedSha256) throw new Error(`附件校验失败：${options.fileId}`);
+    const afterRead = fs.fstatSync(handle);
+    if (afterRead.size !== openedInfo.size || afterRead.mtimeMs !== openedInfo.mtimeMs) throw new Error(`附件在读取期间发生变化：${options.fileId}`);
+    return { content, sha256: digest };
+  } finally {
+    fs.closeSync(handle);
+  }
+}
+
+function assertAttachmentMagic(kind: "pdf" | "cover", contentType: string, prefix: Buffer): void {
+  const startsWith = (...bytes: number[]) => bytes.every((byte, index) => prefix[index] === byte);
+  const valid = kind === "pdf"
+    ? startsWith(0x25, 0x50, 0x44, 0x46, 0x2d)
+    : contentType === "image/png"
+      ? startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+      : contentType === "image/jpeg"
+        ? startsWith(0xff, 0xd8, 0xff)
+        : startsWith(0x52, 0x49, 0x46, 0x46) && prefix[8] === 0x57 && prefix[9] === 0x45 && prefix[10] === 0x42 && prefix[11] === 0x50;
+  if (!valid) throw new Error(kind === "pdf" ? "请选择有效的 PDF 文件" : "请选择有效的 PNG、JPEG 或 WebP 封面图片");
+}
+
+function applyCloudAttachmentPaths(books: MigrationEntity[], attachments: MigrationAttachment[]): void {
+  const byId = new Map(books.map((book) => [book.id, book]));
+  for (const attachment of attachments) {
+    const book = byId.get(attachment.bookId);
+    if (!book || book[`${attachment.kind}_file_id`] !== attachment.fileId) throw new Error("迁移附件与书籍记录不一致");
+    book[`${attachment.kind}_file_id`] = attachment.pathname;
+  }
+}
+
+function cloudAttachmentPath(bookId: string, fileId: string): string {
+  if (!isSafePathSegment(bookId) || !isSafePathSegment(fileId)) throw new Error("迁移附件路径无效");
+  return `reading/books/${bookId}/${fileId}`;
 }
 
 function attachmentReference(book: MigrationEntity, kind: "pdf" | "cover") {
@@ -209,8 +305,9 @@ function attachmentReference(book: MigrationEntity, kind: "pdf" | "cover") {
 }
 
 function attachmentContentType(kind: "pdf" | "cover", fileId: string): string {
-  if (kind === "pdf") return "application/pdf";
   const extension = path.extname(fileId).toLowerCase();
+  if (kind === "pdf" && extension === ".pdf") return "application/pdf";
+  if (kind === "pdf") throw new Error("PDF 附件格式无效");
   if (extension === ".png") return "image/png";
   if (extension === ".webp") return "image/webp";
   if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
@@ -241,24 +338,24 @@ function validateDailyReview(value: unknown): void {
 function validateAttachment(value: unknown): void {
   if (!isRecord(value) || typeof value.bookId !== "string" || !isSafePathSegment(value.bookId) || (value.kind !== "pdf" && value.kind !== "cover")
     || typeof value.fileId !== "string" || !isSafePathSegment(value.fileId) || typeof value.filename !== "string"
+    || typeof value.pathname !== "string" || value.pathname !== cloudAttachmentPath(value.bookId, value.fileId)
     || typeof value.size !== "number" || typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)
-    || typeof value.contentType !== "string") {
+    || typeof value.contentType !== "string" || value.contentType !== attachmentContentType(value.kind, value.fileId)) {
     throw new Error("迁移包附件清单无效");
   }
 }
 
 function validateAttachmentManifest(books: MigrationEntity[], attachments: MigrationAttachment[]): void {
-  const expected = books.flatMap((book) => ([
-    attachmentReference(book, "pdf"),
-    attachmentReference(book, "cover"),
-  ].filter((item): item is { bookId: string; kind: "pdf" | "cover"; fileId: string; filename: string } => item !== null)));
-  if (attachments.length !== expected.length) throw new Error("迁移包附件清单与书籍记录不一致");
-  const remaining = new Set(attachments.map((item) => `${item.bookId}:${item.kind}:${item.fileId}`));
+  const referenced = books.flatMap((book) => (["pdf", "cover"] as const).flatMap((kind) => {
+    const pathname = book[`${kind}_file_id`];
+    return typeof pathname === "string" && pathname ? [{ bookId: book.id, kind, pathname }] : [];
+  }));
+  if (attachments.length !== referenced.length) throw new Error("迁移包附件清单与书籍记录不一致");
+  const remaining = new Set(attachments.map((item) => item.pathname));
   if (remaining.size !== attachments.length) throw new Error("迁移包附件清单包含重复记录");
-  for (const reference of expected) {
-    if (!isSafePathSegment(reference.bookId) || !isSafePathSegment(reference.fileId)) throw new Error("迁移包附件路径无效");
-    const key = `${reference.bookId}:${reference.kind}:${reference.fileId}`;
-    if (!remaining.delete(key)) throw new Error("迁移包附件清单与书籍记录不一致");
+  for (const reference of referenced) {
+    const attachment = attachments.find((item) => item.pathname === reference.pathname && item.bookId === reference.bookId && item.kind === reference.kind);
+    if (!attachment || !remaining.delete(attachment.pathname)) throw new Error("迁移包附件清单与书籍记录不一致");
   }
   if (remaining.size > 0) throw new Error("迁移包附件清单与书籍记录不一致");
 }
@@ -289,12 +386,64 @@ function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function hashFile(filePath: string): string {
+  const handle = fs.openSync(filePath, "r");
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    let position = 0;
+    while (true) {
+      const bytesRead = fs.readSync(handle, buffer, 0, buffer.byteLength, position);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    return hash.digest("hex");
+  } finally {
+    fs.closeSync(handle);
+  }
 }
 
-function isDirectChild(root: string, candidate: string): boolean {
-  return path.dirname(candidate) === root;
+function assertDistinctOutput(databasePath: string, outputPath: string): void {
+  const sourceRealPath = fs.realpathSync.native(databasePath);
+  const destinationRealPath = resolveProspectiveRealPath(outputPath);
+  if (samePath(sourceRealPath, destinationRealPath)) throw new Error("迁移包输出路径不能覆盖 SQLite 备份");
+
+  const outputInfo = fs.lstatSync(outputPath, { throwIfNoEntry: false });
+  if (!outputInfo) return;
+  if (outputInfo.isSymbolicLink()) throw new Error("迁移包输出路径不能是符号链接或联接");
+  const sourceInfo = fs.statSync(databasePath);
+  const destinationInfo = fs.statSync(outputPath);
+  if (sameFileIdentity(sourceInfo, destinationInfo) || samePath(sourceRealPath, fs.realpathSync.native(outputPath))) {
+    throw new Error("迁移包输出文件不能与 SQLite 备份共享文件身份");
+  }
+}
+
+function resolveProspectiveRealPath(candidate: string): string {
+  const missingSegments: string[] = [];
+  let existing = candidate;
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) throw new Error("迁移包输出路径无效");
+    missingSegments.unshift(path.basename(existing));
+    existing = parent;
+  }
+  const info = fs.lstatSync(existing);
+  if (!info.isDirectory() && missingSegments.length > 0) throw new Error("迁移包输出目录无效");
+  return path.join(fs.realpathSync.native(existing), ...missingSegments);
+}
+
+function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
+  return left.dev === right.dev && left.ino !== 0 && left.ino === right.ino;
+}
+
+function samePath(left: string, right: string): boolean {
+  const normalize = process.platform === "win32" ? (value: string) => value.toLocaleLowerCase() : (value: string) => value;
+  return normalize(path.normalize(left)) === normalize(path.normalize(right));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isSafePathSegment(value: string): boolean {
