@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { configureCloudApp } from "./server/cloud/app.js";
+import { configureCloudApp } from "./dist-server/server/cloud/app.js";
 
 const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 });
 await configureCloudApp(app, { serveStatic: true });

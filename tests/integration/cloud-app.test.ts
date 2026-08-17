@@ -1,4 +1,5 @@
 // @vitest-environment node
+import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildCloudApp } from "../../server/cloud/app.js";
 import { ValidationError } from "../../server/errors.js";
@@ -67,6 +68,12 @@ async function app() {
 }
 
 describe("cloud application", () => {
+  it("uses Vercel's zero-configuration Fastify entrypoint", () => {
+    const config = JSON.parse(fs.readFileSync(new URL("../../vercel.json", import.meta.url), "utf8"));
+    expect(config.framework).toBe("fastify");
+    expect(config.functions).toBeUndefined();
+  });
+
   it("reports a safe connected cloud health response", async () => {
     process.env.DATABASE_URL = "must-not-leak";
     process.env.BLOB_READ_WRITE_TOKEN = "must-not-leak-either";

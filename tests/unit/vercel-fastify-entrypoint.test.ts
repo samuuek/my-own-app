@@ -2,6 +2,7 @@
 import net from "node:net";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const originalEnv = { ...process.env };
@@ -21,9 +22,10 @@ async function availablePort(): Promise<number> {
 
 describe("Vercel Fastify entrypoint", () => {
   it("directly imports Fastify for the installed framework detector", async () => {
-    const entrypoint = path.join(process.cwd(), "server.ts");
+    const entrypoint = path.join(process.cwd(), "server.mjs");
     const source = await readFile(entrypoint, "utf8");
     expect(source).toMatch(/import\s+Fastify\s+from\s+["']fastify["']/);
+    expect(source).toContain('./dist-server/server/cloud/app.js');
   });
 
   it("starts listening on PORT", async () => {
@@ -32,7 +34,8 @@ describe("Vercel Fastify entrypoint", () => {
     process.env.DATABASE_URL = "postgresql://user:pass@localhost:5432/muzi";
     process.env.BLOB_READ_WRITE_TOKEN = "test-only";
     process.env.PORT = String(port);
-    const { default: app } = await import("../../server.js");
+    const entrypoint = pathToFileURL(path.join(process.cwd(), "server.mjs")).href;
+    const { default: app } = await import(entrypoint);
     try {
       expect(app.server.listening).toBe(true);
       const address = app.server.address();
