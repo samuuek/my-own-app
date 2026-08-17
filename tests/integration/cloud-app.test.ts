@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildCloudApp } from "../../server/cloud/app.js";
+import { ValidationError } from "../../server/errors.js";
 import type { Entity } from "../../server/store.js";
 
 function makeDependencies() {
@@ -130,6 +131,15 @@ describe("cloud application", () => {
     const removed = await instance.inject({ method: "DELETE", url: "/api/collections/books/book-1/permanent" });
     expect(removed.statusCode).toBe(204);
     expect(files.permanentDeleteBook).toHaveBeenCalledWith("book-1");
+    expect(store.permanentDelete).not.toHaveBeenCalled();
+  });
+
+  it("leaves an active book and its files intact when permanent deletion is requested", async () => {
+    const { instance, files, store } = await app();
+    vi.mocked(files.permanentDeleteBook).mockRejectedValueOnce(new ValidationError("请先将记录移入回收站"));
+    const response = await instance.inject({ method: "DELETE", url: "/api/collections/books/book-1/permanent" });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toContain("回收站");
     expect(store.permanentDelete).not.toHaveBeenCalled();
   });
 

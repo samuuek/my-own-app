@@ -146,12 +146,14 @@ export class CloudStore {
     });
   }
 
-  async permanentDelete(name: CollectionName, id: string): Promise<void> {
+  async permanentDelete(name: CollectionName, id: string): Promise<boolean> {
     assertCollectionName(name);
-    await this.queryable.query(`
+    const result = await this.queryable.query<{ id: string }>(`
       DELETE FROM workspace_entities
       WHERE collection = $1 AND id = $2 AND deleted_at IS NOT NULL
+      RETURNING id
     `, [name, id]);
+    return result.rows.length > 0;
   }
 
   async enqueueBlobCleanup(pathname: string, reason: string): Promise<void> {

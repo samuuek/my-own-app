@@ -1,5 +1,6 @@
 import path from "node:path";
 import { del, get } from "@vercel/blob";
+import { NotFoundError } from "../errors.js";
 import { ReadingValidationError } from "../reading.js";
 import type { Entity } from "../store.js";
 
@@ -24,7 +25,7 @@ type ReadingFileStore = {
   get(collection: "books", id: string, includeDeleted?: boolean): Promise<Entity>;
   getForUpdate(collection: "books", id: string, includeDeleted?: boolean): Promise<Entity>;
   update(collection: "books", id: string, input: Entity): Promise<Entity>;
-  permanentDelete(collection: "books", id: string): Promise<void>;
+  permanentDelete(collection: "books", id: string): Promise<boolean>;
   transaction<T>(work: (store: ReadingFileStore) => Promise<T>): Promise<T>;
   enqueueBlobCleanup(pathname: string, reason: string): Promise<void>;
   listBlobCleanup(limit?: number): Promise<CleanupRecord[]>;
@@ -85,19 +86,30 @@ export class CloudReadingFileManager {
   async completeUpload({ blob, tokenPayload }: CompletedUpload): Promise<void> {
     const payload = parseUploadPayload(tokenPayload ?? null);
     const uploadedPath = this.completedPath(payload, blob.pathname, blob.contentType);
-    await this.store.transaction(async (store) => {
-      const book = await store.getForUpdate("books", payload.bookId);
-      const field = payload.kind === "pdf" ? "pdf_file_id" : "cover_file_id";
-      const filenameField = payload.kind === "pdf" ? "pdf_filename" : "cover_filename";
-      const oldPath = book[field];
-      if (typeof oldPath === "string" && oldPath !== uploadedPath) {
-        await store.enqueueBlobCleanup(oldPath, payload.kind === "pdf" ? "replace-pdf" : "replace-cover");
-      }
-      await store.update("books", payload.bookId, {
-        [field]: uploadedPath,
-        [filenameField]: payload.originalName,
+    try {
+      await this.validateUploadedContent(payload, uploadedPath);
+    } catch (error) {
+      await this.queueRejectedUpload(uploadedPath, "invalid-upload");
+      throw error;
+    }
+    try {
+      await this.store.transaction(async (store) => {
+        const book = await store.getForUpdate("books", payload.bookId);
+        const field = payload.kind === "pdf" ? "pdf_file_id" : "cover_file_id";
+        const filenameField = payload.kind === "pdf" ? "pdf_filename" : "cover_filename";
+        const oldPath = book[field];
+        if (typeof oldPath === "string" && oldPath !== uploadedPath) {
+          await store.enqueueBlobCleanup(oldPath, payload.kind === "pdf" ? "replace-pdf" : "replace-cover");
+        }
+        await store.update("books", payload.bookId, {
+          [field]: uploadedPath,
+          [filenameField]: payload.originalName,
+        });
       });
-    });
+    } catch (error) {
+      await this.queueRejectedUpload(uploadedPath, "upload-metadata-failed");
+      throw error;
+    }
     await this.retryPendingCleanup();
   }
 
@@ -142,9 +154,11 @@ export class CloudReadingFileManager {
   async permanentDeleteBook(bookId: string): Promise<void> {
     await this.store.transaction(async (store) => {
       const book = await store.getForUpdate("books", bookId, true);
+      if (!book.deleted_at) throw new ReadingValidationError("请先将书籍移入回收站，再永久删除");
+      const deleted = await store.permanentDelete("books", bookId);
+      if (!deleted) throw new NotFoundError("没有找到可永久删除的书籍");
       if (typeof book.pdf_file_id === "string") await store.enqueueBlobCleanup(book.pdf_file_id, "delete-book-pdf");
       if (typeof book.cover_file_id === "string") await store.enqueueBlobCleanup(book.cover_file_id, "delete-book-cover");
-      await store.permanentDelete("books", bookId);
     });
     await this.retryPendingCleanup();
   }
@@ -153,12 +167,61 @@ export class CloudReadingFileManager {
     const records = await this.store.listBlobCleanup(limit);
     for (const record of records) {
       try {
-        await this.blob.del(this.readingPath(record.pathname));
+        const pathname = this.readingPath(record.pathname);
+        const bookId = pathname.split("/")[2];
+        if (await this.isCurrentAttachment(bookId, pathname)) {
+          await this.store.completeBlobCleanup(pathname);
+          continue;
+        }
+        await this.blob.del(pathname);
         await this.store.completeBlobCleanup(record.pathname);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Blob cleanup failed";
         await this.store.failBlobCleanup(record.pathname, message.slice(0, 500));
       }
+    }
+  }
+
+  private async validateUploadedContent(payload: UploadPayload, pathname: string): Promise<void> {
+    let result: BlobReadResult | null;
+    try {
+      result = await this.blob.get(pathname, { access: "private" });
+    } catch {
+      throw new ReadingValidationError("无法验证上传文件，请重新上传");
+    }
+    if (!result || result.contentType !== payload.contentType) {
+      throw new ReadingValidationError("无法验证上传文件，请重新上传");
+    }
+    let prefix: Uint8Array;
+    try {
+      prefix = await readPrefix(result.body, 12);
+    } catch {
+      throw new ReadingValidationError("无法验证上传文件，请重新上传");
+    }
+    if (payload.kind === "pdf") {
+      if (!startsWith(prefix, [0x25, 0x50, 0x44, 0x46, 0x2d])) throw new ReadingValidationError("请选择有效的 PDF 文件");
+      return;
+    }
+    const valid = payload.contentType === "image/png"
+      ? startsWith(prefix, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      : payload.contentType === "image/jpeg"
+        ? startsWith(prefix, [0xff, 0xd8, 0xff])
+        : startsWith(prefix, [0x52, 0x49, 0x46, 0x46]) && matchesAt(prefix, 8, [0x57, 0x45, 0x42, 0x50]);
+    if (!valid) throw new ReadingValidationError("请选择 PNG、JPEG 或 WebP 封面图片");
+  }
+
+  private async queueRejectedUpload(pathname: string, reason: string): Promise<void> {
+    await this.store.enqueueBlobCleanup(pathname, reason);
+    await this.retryPendingCleanup();
+  }
+
+  private async isCurrentAttachment(bookId: string, pathname: string): Promise<boolean> {
+    try {
+      const book = await this.store.get("books", bookId, true);
+      return book.pdf_file_id === pathname || book.cover_file_id === pathname;
+    } catch (error) {
+      if (error instanceof NotFoundError) return false;
+      throw error;
     }
   }
 
@@ -228,4 +291,31 @@ function safeDisplayName(value: string | undefined, fallback: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function readPrefix(body: ReadableStream<Uint8Array>, length: number): Promise<Uint8Array> {
+  const reader = body.getReader();
+  const prefix = new Uint8Array(length);
+  let offset = 0;
+  try {
+    while (offset < length) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const take = Math.min(value.byteLength, length - offset);
+      prefix.set(value.subarray(0, take), offset);
+      offset += take;
+    }
+    return prefix.subarray(0, offset);
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
+function startsWith(value: Uint8Array, expected: number[]): boolean {
+  return matchesAt(value, 0, expected);
+}
+
+function matchesAt(value: Uint8Array, offset: number, expected: number[]): boolean {
+  return value.byteLength >= offset + expected.length
+    && expected.every((byte, index) => value[offset + index] === byte);
 }

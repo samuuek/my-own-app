@@ -154,6 +154,18 @@ describe("CloudStore validation and JSONB persistence", () => {
 });
 
 describe("CloudStore transaction binding", () => {
+  it.each([
+    [true, [{ id: "book-1" }]],
+    [false, []],
+  ])("reports permanent-delete success=%s from DELETE RETURNING", async (expected, rows) => {
+    const database = new RecordingDatabase((text) => text.includes("DELETE FROM workspace_entities") ? { rows } : { rows: [] });
+    const store = new CloudStore(database);
+
+    await expect(store.permanentDelete("books", "book-1")).resolves.toBe(expected);
+    expect(database.rootCalls[0].text).toContain("deleted_at IS NOT NULL");
+    expect(database.rootCalls[0].text).toContain("RETURNING id");
+  });
+
   it("allows locked reads only through a transaction-bound store", async () => {
     const active = {
       id: "timer-1",
