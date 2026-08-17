@@ -5,13 +5,25 @@ import { ValidationError } from "../../server/errors.js";
 import type { Entity } from "../../server/store.js";
 
 function makeDependencies() {
-  const entities = new Map<string, Entity>([["task-1", { id: "task-1", title: "Existing", plan_date: "2026-08-17", status: "todo" }]]);
+  const entities = new Map<string, Entity>([
+    ["task-1", { id: "task-1", title: "Existing", plan_date: "2026-08-17", status: "todo" }],
+    ["book-1", { id: "book-1", title: "Protected book", author: "Original author", status: "reading", current_page: 10 }],
+    ["memo-1", { id: "memo-1", content: "Convert me" }],
+  ]);
   const store = {
     state: vi.fn(async () => ({ planItems: [...entities.values()], settings: {}, trash: [] })),
     list: vi.fn(async () => [...entities.values()]),
     get: vi.fn(async (_collection: string, id: string) => entities.get(id)!),
-    create: vi.fn(async (_collection: string, input: Entity) => ({ id: "created", ...input })),
-    update: vi.fn(async (_collection: string, id: string, input: Entity) => ({ ...entities.get(id), ...input, id })),
+    create: vi.fn(async (_collection: string, input: Entity) => {
+      const entity = { id: "created", ...input };
+      entities.set(entity.id, entity);
+      return entity;
+    }),
+    update: vi.fn(async (_collection: string, id: string, input: Entity) => {
+      const entity = { ...entities.get(id), ...input, id };
+      entities.set(id, entity);
+      return entity;
+    }),
     softDelete: vi.fn(async (_collection: string, id: string) => ({ ...entities.get(id), id, deleted_at: "2026-08-17T00:00:00.000Z" })),
     restore: vi.fn(async (_collection: string, id: string) => ({ ...entities.get(id), id, deleted_at: null })),
     permanentDelete: vi.fn(async () => undefined),
@@ -41,7 +53,7 @@ function makeDependencies() {
     await options.onUploadCompleted(options.body.payload);
     return { type: "blob.upload-completed", response: "ok" };
   });
-  return { store, focusTimers, files, clientUploads };
+  return { store, focusTimers, files, clientUploads, entities };
 }
 
 const apps: Array<Awaited<ReturnType<typeof buildCloudApp>>> = [];
@@ -88,6 +100,71 @@ describe("cloud application", () => {
     expect(store.create).toHaveBeenCalledOnce();
     expect(store.update).toHaveBeenCalledOnce();
     expect(store.softDelete).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a claimed Blob pathname through generic book PATCH without changing metadata", async () => {
+    const { instance, entities } = await app();
+    const before = { ...entities.get("book-1") };
+    const response = await instance.inject({
+      method: "PATCH",
+      url: "/api/collections/books/book-1",
+      headers: { origin: "https://cloud.example", host: "cloud.example" },
+      payload: { pdf_file_id: "reading/books/book-1/claimed.pdf" },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toContain("附件");
+    expect(entities.get("book-1")).toEqual(before);
+  });
+
+  it.each([
+    ["pdf_file_id", "reading/books/book-1/claimed.pdf"],
+    ["pdf_filename", "claimed.pdf"],
+    ["pdf_file_name", "claimed.pdf"],
+    ["cover_file_id", "reading/books/book-1/claimed.webp"],
+    ["cover_filename", "claimed.webp"],
+    ["cover_file_name", "claimed.webp"],
+  ])("rejects managed book field %s on generic create", async (field, value) => {
+    const { instance, entities } = await app();
+    const response = await instance.inject({
+      method: "POST",
+      url: "/api/collections/books",
+      headers: { origin: "https://cloud.example", host: "cloud.example" },
+      payload: { title: "Unsafe book", [field]: value },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(entities.has("created")).toBe(false);
+  });
+
+  it("rejects managed book fields through quick-memo conversion", async () => {
+    const { instance, entities } = await app();
+    const response = await instance.inject({
+      method: "POST",
+      url: "/api/quick-memos/memo-1/convert",
+      headers: { origin: "https://cloud.example", host: "cloud.example" },
+      payload: { collection: "books", fields: { cover_file_id: "reading/books/book-1/claimed.webp" } },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(entities.has("created")).toBe(false);
+    expect(entities.get("memo-1")?.archived_at).toBeUndefined();
+  });
+
+  it("continues to create and update normal cloud book fields", async () => {
+    const { instance, entities } = await app();
+    const headers = { origin: "https://cloud.example", host: "cloud.example" };
+    const created = await instance.inject({
+      method: "POST", url: "/api/collections/books", headers,
+      payload: { title: "Allowed book", author: "Allowed author", status: "wishlist" },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().data).toMatchObject({ title: "Allowed book", author: "Allowed author", status: "wishlist" });
+
+    const updated = await instance.inject({
+      method: "PATCH", url: "/api/collections/books/book-1", headers,
+      payload: { author: "Updated author", current_page: 12 },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().data).toMatchObject({ id: "book-1", author: "Updated author", current_page: 12 });
+    expect(entities.get("book-1")).toMatchObject({ author: "Updated author", current_page: 12 });
   });
 
   it("rejects foreign write origins while accepting same-origin HTTPS", async () => {

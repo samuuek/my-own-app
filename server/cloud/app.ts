@@ -17,6 +17,10 @@ import { cloudSystemStatus, DesktopOnlyError, DirectUploadRequiredError, isAllow
 import { CloudWorkflowService } from "./workflows.js";
 
 const bodySchema = z.record(z.string(), z.unknown());
+const managedBookFileFields = new Set([
+  "pdf_file_id", "pdf_filename", "pdf_file_name",
+  "cover_file_id", "cover_filename", "cover_file_name",
+]);
 
 type FocusTimers = Pick<CloudFocusTimerService, "current" | "start" | "pause" | "resume" | "finish">;
 type ReadingFiles = Pick<CloudReadingFileManager, "authorizeUpload" | "completeUpload" | "readPdf" | "removePdf" | "readCover" | "removeCover" | "permanentDeleteBook" | "retryPendingCleanup">;
@@ -133,13 +137,17 @@ export async function configureCloudApp(app: FastifyInstance, options: BuildClou
   app.post("/api/collections/:collection", async (request, reply) => {
     const { collection } = request.params as { collection: string };
     assertCollection(collection);
-    const entity = await store.create(collection, bodySchema.parse(request.body ?? {}));
+    const input = bodySchema.parse(request.body ?? {});
+    assertNoManagedBookFileFields(collection, input);
+    const entity = await store.create(collection, input);
     return reply.code(201).send({ data: entity });
   });
   app.patch("/api/collections/:collection/:id", async (request) => {
     const { collection, id } = request.params as { collection: string; id: string };
     assertCollection(collection);
-    return { data: await store.update(collection, id, bodySchema.parse(request.body ?? {})) };
+    const input = bodySchema.parse(request.body ?? {});
+    assertNoManagedBookFileFields(collection, input);
+    return { data: await store.update(collection, id, input) };
   });
   app.delete("/api/collections/:collection/:id", async (request) => {
     const { collection, id } = request.params as { collection: string; id: string };
@@ -236,6 +244,7 @@ export async function configureCloudApp(app: FastifyInstance, options: BuildClou
     const { id } = request.params as { id: string };
     const body = z.object({ collection: z.string(), fields: z.record(z.string(), z.unknown()).default({}) }).parse(request.body);
     assertCollection(body.collection);
+    assertNoManagedBookFileFields(body.collection, body.fields);
     return { data: await workflows.convertQuickMemo(id, body.collection, body.fields) };
   });
 
@@ -292,6 +301,16 @@ function createDefaultStore(): CloudStore {
 
 function assertCollection(value: string): asserts value is keyof typeof collectionDefinitions {
   if (!isCollectionName(value)) throw new NotFoundError("模块不存在");
+}
+
+function assertNoManagedBookFileFields(
+  collection: keyof typeof collectionDefinitions,
+  input: Record<string, unknown>,
+): void {
+  if (collection !== "books") return;
+  if (Object.keys(input).some((field) => managedBookFileFields.has(field))) {
+    throw new ValidationError("书籍附件只能通过专用上传或删除操作修改");
+  }
 }
 
 function localDate(): string {
