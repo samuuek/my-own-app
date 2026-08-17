@@ -28,7 +28,7 @@ describe("Vercel Fastify entrypoint", () => {
     expect(source).toContain('./dist-server/server/cloud/app.js');
   });
 
-  it("starts listening on PORT", async () => {
+  it("serves the built frontend and safe health API over HTTP on PORT", async () => {
     const port = await availablePort();
     process.env.MUZI_RUNTIME = "cloud";
     process.env.DATABASE_URL = "postgresql://user:pass@localhost:5432/muzi";
@@ -40,8 +40,25 @@ describe("Vercel Fastify entrypoint", () => {
       expect(app.server.listening).toBe(true);
       const address = app.server.address();
       expect(address && typeof address === "object" ? address.port : 0).toBe(port);
+
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const page = await fetch(`${baseUrl}/`);
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-type")).toContain("text/html");
+      expect(await page.text()).toContain('<div id="root"></div>');
+
+      const health = await fetch(`${baseUrl}/api/health`);
+      expect(health.status).toBe(200);
+      const payload = await health.json() as { data: Record<string, unknown> };
+      expect(payload.data).toMatchObject({
+        application: "muzi-workspace",
+        runtime: "cloud",
+        database: "connected",
+        status: "ok",
+      });
+      expect(payload.data).not.toHaveProperty("databaseUrl");
     } finally {
       await app.close();
     }
-  });
+  }, 15_000);
 });
