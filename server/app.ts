@@ -14,6 +14,7 @@ import { collectionDefinitions, isCollectionName, sourceCollectionByType } from 
 import { openPathCommand } from "./platform.js";
 import { ReadingFileManager } from "./reading-files.js";
 import { FocusTimerService } from "./focus-timer.js";
+import { isAllowedWriteOrigin } from "./cloud/system.js";
 
 const bodySchema = z.record(z.string(), z.unknown());
 
@@ -39,7 +40,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   app.addHook("onRequest", async (request, reply) => {
     if (!["POST", "PATCH", "PUT", "DELETE"].includes(request.method)) return;
     const origin = request.headers.origin;
-    if (origin && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
+    if (!isAllowedWriteOrigin(origin, request.headers.host, "desktop")) {
       return reply.code(403).send({ error: { code: "INVALID_ORIGIN", message: "请求来源无效" } });
     }
   });
@@ -381,6 +382,7 @@ function fileInfo(file: string): Record<string, any> {
 
 function systemStatus(paths: AppPaths, backups: BackupManager): Record<string, any> {
   return {
+    mode: "desktop",
     dataFile: fileInfo(paths.dataFile),
     dataDirectory: paths.root,
     backupsDirectory: paths.backupsDir,

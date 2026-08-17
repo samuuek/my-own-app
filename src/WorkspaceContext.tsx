@@ -92,7 +92,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
   }), [query.data, query.isLoading, query.error, queryClient, registerSaveHandler, run, saveNow, saveStatus]);
 
-  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+  return (
+    <WorkspaceContext.Provider value={value}>
+      {query.data && query.error ? (
+        <div className="workspace-refetch-error" role="alert">
+          <span>数据刷新失败，已保留上次内容。</span>
+          <button type="button" onClick={() => void query.refetch()}>重试</button>
+        </div>
+      ) : null}
+      {children}
+    </WorkspaceContext.Provider>
+  );
 }
 
 export function useWorkspace(): WorkspaceContextValue {

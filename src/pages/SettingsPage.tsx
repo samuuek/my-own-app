@@ -29,6 +29,7 @@ export function SettingsPage() {
   if (system.isLoading || backups.isLoading) return <><PageHeader icon={<ModuleArtwork module="settings" />} eyebrow="系统" title="数据与设置" description="检查本地数据和备份状态" /><Skeleton lines={8} /></>;
   if (system.error || backups.error) return <ErrorState message={((system.error || backups.error) as Error).message} onRetry={() => { void system.refetch(); void backups.refetch(); }} />;
   const status = system.data!;
+  const cloudMode = status.mode === "cloud";
   const selectedBackup = backups.data?.find((backup) => backup.id === restoreId);
   const appearance = normalizeAppearance(data.settings.appearance);
   const persistedModules = Array.isArray(data.settings.dashboardModules) ? data.settings.dashboardModules : dashboardOptions.map((option) => option.value);
@@ -44,14 +45,21 @@ export function SettingsPage() {
   };
   return (
     <div>
-      <PageHeader icon={<ModuleArtwork module="settings" />} eyebrow="本机数据控制" title="数据与设置" description="查看数据文件、创建备份、恢复历史版本并调整使用偏好。" />
-      <Section title="数据文件" description="业务数据保存在浏览器之外的独立 SQLite 文件中" action={<Button variant="secondary" onClick={() => void api.openDataDirectory()}><FolderOpen size={16} />打开数据目录</Button>}>
-        <div className="data-file-panel"><div className="file-icon"><Database size={27} /></div><div className="file-copy"><strong>app.sqlite</strong><code>{status.dataFile.path}</code><div><span>{formatBytes(status.dataFile.size)}</span><span>修改于 {formatDateTime(status.dataFile.modifiedAt)}</span><Badge tone={status.dataFile.writable ? "success" : "warning"}><Check size={12} />{status.dataFile.writable ? "可读写" : "只读"}</Badge></div></div></div>
-      </Section>
-      <div className="settings-grid">
-        <Section title="备份与恢复" description="每天自动备份一次，普通自动备份保留最近30份" action={<Button loading={busy === "backup"} onClick={() => void createBackup()}><ShieldCheck size={16} />立即备份</Button>}>
-          {backups.data?.length ? <div className="backup-list">{backups.data.map((backup) => <article key={backup.id}><div className="backup-type"><Archive size={18} /><Badge tone={backup.type === "safety" ? "warning" : backup.type === "automatic" ? "neutral" : "accent"}>{backup.type === "automatic" ? "自动" : backup.type === "safety" ? "安全" : "手动"}</Badge></div><div className="backup-copy"><input aria-label={`备份名称 ${formatDateTime(backup.createdAt)}`} defaultValue={backup.label} placeholder="添加备份名称" onBlur={(event) => { if (event.target.value.trim() !== backup.label) void run(() => api.updateBackup(backup.id, { label: event.target.value })); }} /><small>{formatDateTime(backup.createdAt)} · {formatBytes(backup.size)}</small></div><label className="keep-check"><input type="checkbox" checked={backup.keep} onChange={(event) => void run(() => api.updateBackup(backup.id, { keep: event.target.checked }))} />长期保留</label><Button variant="ghost" size="sm" onClick={() => setRestoreId(backup.id)}><ArrowCounterClockwise size={15} />恢复</Button></article>)}</div> : <EmptyState title="还没有备份" description="创建第一份完整备份。" />}
+      <PageHeader icon={<ModuleArtwork module="settings" />} eyebrow={cloudMode ? "云端数据控制" : "本机数据控制"} title="数据与设置" description={cloudMode ? "查看受保护的云端存储状态并调整使用偏好。" : "查看数据文件、创建备份、恢复历史版本并调整使用偏好。"} />
+      {cloudMode ? (
+        <Section title="受保护的云端副本" description="数据和阅读附件保存在受身份验证保护的云端服务中">
+          <div className="data-file-panel"><div className="file-icon"><Database size={27} /></div><div className="file-copy"><strong>{status.database.provider}</strong><span>数据库 · {status.database.status === "connected" ? "已连接" : status.database.status}</span><div><Badge tone="success"><Check size={12} />已连接</Badge><span>{status.recovery.provider}</span></div></div></div>
+          <div className="data-file-panel"><div className="file-icon"><ShieldCheck size={27} /></div><div className="file-copy"><strong>{status.fileStorage.provider}</strong><span>私有文件存储 · {status.fileStorage.status === "connected" ? "已连接" : status.fileStorage.status}</span><div><Badge tone="success"><Check size={12} />私有访问</Badge><span>下载通过受保护的应用接口完成</span></div></div></div>
         </Section>
+      ) : (
+        <Section title="数据文件" description="业务数据保存在浏览器之外的独立 SQLite 文件中" action={<Button variant="secondary" onClick={() => void api.openDataDirectory()}><FolderOpen size={16} />打开数据目录</Button>}>
+          <div className="data-file-panel"><div className="file-icon"><Database size={27} /></div><div className="file-copy"><strong>app.sqlite</strong><code>{status.dataFile.path}</code><div><span>{formatBytes(status.dataFile.size)}</span><span>修改于 {formatDateTime(status.dataFile.modifiedAt)}</span><Badge tone={status.dataFile.writable ? "success" : "warning"}><Check size={12} />{status.dataFile.writable ? "可读写" : "只读"}</Badge></div></div></div>
+        </Section>
+      )}
+      <div className="settings-grid">
+        {!cloudMode ? <Section title="备份与恢复" description="每天自动备份一次，普通自动备份保留最近30份" action={<Button loading={busy === "backup"} onClick={() => void createBackup()}><ShieldCheck size={16} />立即备份</Button>}>
+          {backups.data?.length ? <div className="backup-list">{backups.data.map((backup) => <article key={backup.id}><div className="backup-type"><Archive size={18} /><Badge tone={backup.type === "safety" ? "warning" : backup.type === "automatic" ? "neutral" : "accent"}>{backup.type === "automatic" ? "自动" : backup.type === "safety" ? "安全" : "手动"}</Badge></div><div className="backup-copy"><input aria-label={`备份名称 ${formatDateTime(backup.createdAt)}`} defaultValue={backup.label} placeholder="添加备份名称" onBlur={(event) => { if (event.target.value.trim() !== backup.label) void run(() => api.updateBackup(backup.id, { label: event.target.value })); }} /><small>{formatDateTime(backup.createdAt)} · {formatBytes(backup.size)}</small></div><label className="keep-check"><input type="checkbox" checked={backup.keep} onChange={(event) => void run(() => api.updateBackup(backup.id, { keep: event.target.checked }))} />长期保留</label><Button variant="ghost" size="sm" onClick={() => setRestoreId(backup.id)}><ArrowCounterClockwise size={15} />恢复</Button></article>)}</div> : <EmptyState title="还没有备份" description="创建第一份完整备份。" />}
+        </Section> : null}
         <Section title="导出" description="生成包含 JSON 和各模块 CSV 的压缩包"><div className="export-panel"><DownloadSimple size={28} /><div><strong>完整数据导出</strong><p>适合人工查看和未来迁移，不替代完整备份。</p></div><Button variant="secondary" loading={busy === "export"} onClick={() => void exportAll()}>导出 ZIP</Button></div></Section>
       </div>
       <Section title="使用偏好" description="设置会保存在主数据文件中">
@@ -67,7 +75,7 @@ export function SettingsPage() {
       <Section title="回收站" description="删除记录先进入这里，永久删除需要再次确认">
         {data.trash.length ? <div className="trash-list">{data.trash.map((item) => <article key={item.id}><Trash size={18} /><div><strong>{item.display_title}</strong><small>{collectionLabels[item.collection] || item.collection} · 删除于 {formatDateTime(item.deleted_at)}</small></div><Button variant="ghost" size="sm" onClick={() => void run(() => api.restore(item.collection as CollectionName, item.entity_id))}><ArrowCounterClockwise size={15} />恢复</Button><Button variant="ghost" size="sm" className="danger-text" onClick={() => setPermanent({ collection: item.collection as CollectionName, id: item.entity_id, title: item.display_title })}>永久删除</Button></article>)}</div> : <p className="quiet-line">回收站是空的。</p>}
       </Section>
-      <ConfirmDialog open={Boolean(restoreId)} title="恢复这份备份？" description={selectedBackup ? `${selectedBackup.label || selectedBackup.filename} · ${formatDateTime(selectedBackup.createdAt)} · ${formatBytes(selectedBackup.size)}。恢复前会先为当前数据创建安全备份。` : "恢复前会先为当前数据创建安全备份。"} confirmLabel="创建安全备份并恢复" onClose={() => setRestoreId(null)} onConfirm={async () => { if (!restoreId) return; setBusy("restore"); try { await api.restoreBackup(restoreId); window.location.reload(); } finally { setBusy(""); } }} />
+      {!cloudMode ? <ConfirmDialog open={Boolean(restoreId)} title="恢复这份备份？" description={selectedBackup ? `${selectedBackup.label || selectedBackup.filename} · ${formatDateTime(selectedBackup.createdAt)} · ${formatBytes(selectedBackup.size)}。恢复前会先为当前数据创建安全备份。` : "恢复前会先为当前数据创建安全备份。"} confirmLabel="创建安全备份并恢复" onClose={() => setRestoreId(null)} onConfirm={async () => { if (!restoreId) return; setBusy("restore"); try { await api.restoreBackup(restoreId); window.location.reload(); } finally { setBusy(""); } }} /> : null}
       <ConfirmDialog open={Boolean(permanent)} title="永久删除这条记录？" description={`“${permanent?.title ?? "记录"}”将无法从回收站恢复。`} confirmLabel="永久删除" danger onClose={() => setPermanent(null)} onConfirm={async () => { if (permanent) await run(() => api.permanentDelete(permanent.collection, permanent.id)); }} />
     </div>
   );

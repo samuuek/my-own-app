@@ -6,6 +6,25 @@ export class ApiError extends Error {
   }
 }
 
+export type DesktopSystemStatus = {
+  mode: "desktop";
+  dataFile: { path: string; size: number; modifiedAt: string; writable: boolean };
+  dataDirectory: string;
+  backupsDirectory: string;
+  exportsDirectory: string;
+  latestBackup: BackupRecord | null;
+  backupStatus: { state: "idle" | "ok" | "error"; lastAttemptAt: string | null; lastError: string | null; busy: boolean };
+};
+
+export type CloudSystemStatus = {
+  mode: "cloud";
+  database: { provider: "Neon"; status: "connected" };
+  fileStorage: { provider: "Vercel Blob"; status: "connected" };
+  recovery: { provider: "Neon restore window" };
+};
+
+export type SystemStatus = DesktopSystemStatus | CloudSystemStatus;
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -61,8 +80,11 @@ export const api = {
     request<Entity>(`/api/quick-memos/${id}/convert`, { method: "POST", body: JSON.stringify({ collection, fields }) }),
   settings: () => request<Record<string, any>>("/api/settings"),
   saveSettings: (input: Record<string, any>) => request<Record<string, any>>("/api/settings", { method: "PUT", body: JSON.stringify(input) }),
-  systemStatus: () => request<Record<string, any>>("/api/system/status"),
-  saveNow: () => request<{ savedAt: string; database: string; dataFile: string }>("/api/system/save", { method: "POST" }),
+  systemStatus: () => request<SystemStatus>("/api/system/status"),
+  saveNow: () => request<
+    | { savedAt: string; database: string; dataFile: string; mode?: "desktop" }
+    | { savedAt: string; database: "connected"; runtime: "cloud" }
+  >("/api/system/save", { method: "POST" }),
   saveAndExit: () => request<{ savedAt: string; database: string; dataFile: string; exiting: boolean }>("/api/system/save-and-exit", { method: "POST" }),
   openDataDirectory: () => request<Record<string, any>>("/api/system/open-data-directory", { method: "POST" }),
   openPath: (path: string) => request<Record<string, any>>("/api/system/open-path", { method: "POST", body: JSON.stringify({ path }) }),

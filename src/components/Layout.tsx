@@ -67,6 +67,9 @@ export function AppLayout() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [exitState, setExitState] = useState<"idle" | "saving" | "done" | "error">("idle");
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus, staleTime: 30_000 });
+  const cloudMode = system.data?.mode === "cloud";
+  const backupStatus = system.data && "backupStatus" in system.data ? system.data.backupStatus : undefined;
+  const latestBackup = system.data && "latestBackup" in system.data ? system.data.latestBackup : undefined;
   const currentPage = routeMeta[location.pathname] ?? (location.pathname.startsWith("/reading/") ? routeMeta["/reading"] : location.pathname.startsWith("/reflection/") ? routeMeta["/reflection"] : routeMeta["/"]);
   const appearance = normalizeAppearance(data.settings.appearance);
   const theme = data.settings.theme === "dark" ? "dark" : "light";
@@ -163,7 +166,7 @@ export function AppLayout() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <div className={classNames("local-state", system.data?.backupStatus?.state === "error" && "backup-error")}><span className="status-dot" /><div><strong>{system.data?.backupStatus?.state === "error" ? "自动备份失败" : "仅保存在这台电脑"}</strong><small>{system.data?.backupStatus?.state === "error" ? system.data.backupStatus.lastError : system.data?.latestBackup ? `备份于 ${formatDateTime(system.data.latestBackup.createdAt)}` : "等待首次备份"}</small></div></div>
+          <div className={classNames("local-state", backupStatus?.state === "error" && "backup-error")}><span className="status-dot" /><div><strong>{cloudMode ? "受保护的云端副本" : backupStatus?.state === "error" ? "自动备份失败" : "仅保存在这台电脑"}</strong><small>{cloudMode ? "Neon 与 Vercel Blob" : backupStatus?.state === "error" ? backupStatus.lastError : latestBackup ? `备份于 ${formatDateTime(latestBackup.createdAt)}` : "等待首次备份"}</small></div></div>
         </div>
       </aside>
       <div className="app-main">
@@ -178,7 +181,7 @@ export function AppLayout() {
             <button className="search-trigger glass-clear" aria-label="搜索所有内容" title="搜索所有内容" onClick={() => setSearchOpen(true)}><MagnifyingGlass size={18} /><span>搜索所有内容</span><kbd><Command size={12} />K</kbd></button>
             <Button className="topbar-create" variant="secondary" size="sm" onClick={() => setQuickOpen(true)}><Plus size={16} />快速新建</Button>
             <Button className="manual-save" variant="secondary" size="sm" loading={saveStatus === "saving"} onClick={() => void saveNow().catch(() => undefined)}><FloppyDisk size={16} />手动保存</Button>
-            <Button className="save-exit" variant="ghost" size="sm" loading={exitState === "saving"} disabled={exitState === "done"} onClick={() => void saveAndExit()}><Power size={16} />{exitState === "error" ? "退出失败，重试" : "保存并退出"}</Button>
+            {!cloudMode ? <Button className="save-exit" variant="ghost" size="sm" loading={exitState === "saving"} disabled={exitState === "done"} onClick={() => void saveAndExit()}><Power size={16} />{exitState === "error" ? "退出失败，重试" : "保存并退出"}</Button> : null}
             <SaveIndicator status={saveStatus} />
           </div>
         </header>
