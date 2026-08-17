@@ -27,9 +27,20 @@ function makeDependencies() {
     current: vi.fn(async () => null), start: vi.fn(async () => ({ id: "timer-1" })), pause: vi.fn(), resume: vi.fn(), finish: vi.fn(),
   };
   const files = {
-    savePdf: vi.fn(), readPdf: vi.fn(), removePdf: vi.fn(), saveCover: vi.fn(), readCover: vi.fn(), removeCover: vi.fn(), removeBookFiles: vi.fn(),
+    authorizeUpload: vi.fn(async () => ({ allowedContentTypes: ["application/pdf"], maximumSizeInBytes: 100 * 1024 * 1024, addRandomSuffix: true, tokenPayload: "safe" })),
+    completeUpload: vi.fn(async () => undefined),
+    readPdf: vi.fn(), removePdf: vi.fn(), readCover: vi.fn(), removeCover: vi.fn(),
+    permanentDeleteBook: vi.fn(async () => undefined), retryPendingCleanup: vi.fn(async () => undefined),
   };
-  return { store, focusTimers, files };
+  const clientUploads = vi.fn(async (options: any) => {
+    if (options.body.type === "blob.generate-client-token") {
+      await options.onBeforeGenerateToken(options.body.payload.pathname, options.body.payload.clientPayload, options.body.payload.multipart);
+      return { type: "blob.generate-client-token", clientToken: "scoped-client-token" };
+    }
+    await options.onUploadCompleted(options.body.payload);
+    return { type: "blob.upload-completed", response: "ok" };
+  });
+  return { store, focusTimers, files, clientUploads };
 }
 
 const apps: Array<Awaited<ReturnType<typeof buildCloudApp>>> = [];
@@ -84,6 +95,42 @@ describe("cloud application", () => {
     expect(rejected.statusCode).toBe(403);
     expect(rejected.json().error.code).toBe("INVALID_ORIGIN");
     expect(store.create).not.toHaveBeenCalled();
+  });
+
+  it("exchanges a scoped upload token and validates completion without exposing the Blob secret", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "server-secret";
+    const { instance, files, clientUploads } = await app();
+    const payload = JSON.stringify({ bookId: "book-1", kind: "pdf", contentType: "application/pdf", originalName: "book.pdf" });
+    const token = await instance.inject({
+      method: "POST", url: "/api/blob/upload", headers: { origin: "https://cloud.example", host: "cloud.example" },
+      payload: { type: "blob.generate-client-token", payload: { pathname: "reading/books/book-1/book.pdf", multipart: true, clientPayload: payload } },
+    });
+    expect(token.statusCode).toBe(200);
+    expect(token.json()).toEqual({ type: "blob.generate-client-token", clientToken: "scoped-client-token" });
+    expect(token.body).not.toContain("server-secret");
+    expect(files.authorizeUpload).toHaveBeenCalledWith("reading/books/book-1/book.pdf", payload, true);
+
+    const completed = await instance.inject({
+      method: "POST", url: "/api/blob/upload",
+      payload: { type: "blob.upload-completed", payload: { blob: { pathname: "reading/books/book-1/book-random.pdf", contentType: "application/pdf" }, tokenPayload: payload } },
+    });
+    expect(completed.statusCode).toBe(200);
+    expect(files.completeUpload).toHaveBeenCalledWith(expect.objectContaining({ tokenPayload: payload }));
+    expect(clientUploads).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects function-proxied reading uploads and uses durable deletion for books", async () => {
+    const { instance, files, store } = await app();
+    const proxied = await instance.inject({
+      method: "PUT", url: "/api/books/book-1/pdf", headers: { "content-type": "application/pdf" }, payload: Buffer.from("%PDF-1.7"),
+    });
+    expect(proxied.statusCode).toBe(409);
+    expect(proxied.json().error.code).toBe("DIRECT_UPLOAD_REQUIRED");
+
+    const removed = await instance.inject({ method: "DELETE", url: "/api/collections/books/book-1/permanent" });
+    expect(removed.statusCode).toBe(204);
+    expect(files.permanentDeleteBook).toHaveBeenCalledWith("book-1");
+    expect(store.permanentDelete).not.toHaveBeenCalled();
   });
 
   it.each([

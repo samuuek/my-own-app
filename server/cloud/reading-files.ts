@@ -1,13 +1,7 @@
 import path from "node:path";
-import { del, get, put } from "@vercel/blob";
+import { del, get } from "@vercel/blob";
 import { ReadingValidationError } from "../reading.js";
 import type { Entity } from "../store.js";
-
-type BlobPutOptions = {
-  access: "private";
-  addRandomSuffix: true;
-  contentType: string;
-};
 
 type BlobReadResult = {
   body: ReadableStream<Uint8Array>;
@@ -15,18 +9,51 @@ type BlobReadResult = {
 };
 
 export type CloudBlobClient = {
-  put(pathname: string, content: Buffer, options: BlobPutOptions): Promise<{ pathname: string; contentType: string }>;
   get(pathname: string, options: { access: "private" }): Promise<BlobReadResult | null>;
   del(pathname: string): Promise<void>;
 };
 
-type ReadingFileStore = {
-  get(collection: "books", id: string, includeDeleted?: boolean): Promise<Entity>;
-  update(collection: "books", id: string, input: Entity): Promise<Entity>;
+type CleanupRecord = {
+  pathname: string;
+  reason: string;
+  attempts: number;
+  last_error: string | null;
 };
 
+type ReadingFileStore = {
+  get(collection: "books", id: string, includeDeleted?: boolean): Promise<Entity>;
+  getForUpdate(collection: "books", id: string, includeDeleted?: boolean): Promise<Entity>;
+  update(collection: "books", id: string, input: Entity): Promise<Entity>;
+  permanentDelete(collection: "books", id: string): Promise<void>;
+  transaction<T>(work: (store: ReadingFileStore) => Promise<T>): Promise<T>;
+  enqueueBlobCleanup(pathname: string, reason: string): Promise<void>;
+  listBlobCleanup(limit?: number): Promise<CleanupRecord[]>;
+  completeBlobCleanup(pathname: string): Promise<void>;
+  failBlobCleanup(pathname: string, message: string): Promise<void>;
+};
+
+type UploadKind = "pdf" | "cover";
+type UploadPayload = {
+  bookId: string;
+  kind: UploadKind;
+  contentType: string;
+  originalName: string;
+};
+
+type CompletedUpload = {
+  blob: { pathname: string; contentType: string };
+  tokenPayload?: string | null;
+};
+
+const PDF_LIMIT = 100 * 1024 * 1024;
+const COVER_LIMIT = 10 * 1024 * 1024;
+const coverExtensions = new Map([
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/webp", "webp"],
+]);
+
 export const vercelBlobClient: CloudBlobClient = {
-  put: async (pathname, content, options) => put(pathname, content, options),
   get: async (pathname, options) => {
     const result = await get(pathname, options);
     if (!result || result.statusCode !== 200) return null;
@@ -41,29 +68,37 @@ export class CloudReadingFileManager {
     private readonly blob: CloudBlobClient = vercelBlobClient,
   ) {}
 
-  async savePdf(bookId: string, content: Buffer, originalName: string): Promise<Entity> {
-    if (content.byteLength > 100 * 1024 * 1024) throw new ReadingValidationError("PDF 文件不能超过 100 MB");
-    if (content.byteLength < 5 || content.subarray(0, 5).toString("ascii") !== "%PDF-") {
-      throw new ReadingValidationError("请选择有效的 PDF 文件");
-    }
-    const book = await this.store.get("books", bookId);
-    const uploaded = await this.blob.put(`reading/books/${bookId}/book.pdf`, content, {
-      access: "private",
-      addRandomSuffix: true,
-      contentType: "application/pdf",
-    });
-    let updated: Entity;
-    try {
-      updated = await this.store.update("books", bookId, {
-        pdf_file_id: uploaded.pathname,
-        pdf_filename: safeDisplayName(originalName, "book.pdf"),
+  async authorizeUpload(pathname: string, clientPayload: string | null, multipart: boolean) {
+    void multipart;
+    const payload = parseUploadPayload(clientPayload);
+    await this.store.get("books", payload.bookId);
+    const expected = requestedPath(payload);
+    if (pathname !== expected) throw new ReadingValidationError("上传路径无效");
+    return {
+      allowedContentTypes: [payload.contentType],
+      maximumSizeInBytes: payload.kind === "pdf" ? PDF_LIMIT : COVER_LIMIT,
+      addRandomSuffix: true as const,
+      tokenPayload: JSON.stringify(payload),
+    };
+  }
+
+  async completeUpload({ blob, tokenPayload }: CompletedUpload): Promise<void> {
+    const payload = parseUploadPayload(tokenPayload ?? null);
+    const uploadedPath = this.completedPath(payload, blob.pathname, blob.contentType);
+    await this.store.transaction(async (store) => {
+      const book = await store.getForUpdate("books", payload.bookId);
+      const field = payload.kind === "pdf" ? "pdf_file_id" : "cover_file_id";
+      const filenameField = payload.kind === "pdf" ? "pdf_filename" : "cover_filename";
+      const oldPath = book[field];
+      if (typeof oldPath === "string" && oldPath !== uploadedPath) {
+        await store.enqueueBlobCleanup(oldPath, payload.kind === "pdf" ? "replace-pdf" : "replace-cover");
+      }
+      await store.update("books", payload.bookId, {
+        [field]: uploadedPath,
+        [filenameField]: payload.originalName,
       });
-    } catch (error) {
-      await this.blob.del(uploaded.pathname).catch(() => undefined);
-      throw error;
-    }
-    if (book.pdf_file_id && book.pdf_file_id !== uploaded.pathname) await this.deleteReadingBlob(String(book.pdf_file_id));
-    return updated;
+    });
+    await this.retryPendingCleanup();
   }
 
   async readPdf(bookId: string): Promise<{ book: Entity; body: ReadableStream<Uint8Array>; contentType: string }> {
@@ -76,33 +111,12 @@ export class CloudReadingFileManager {
   }
 
   async removePdf(bookId: string): Promise<Entity> {
-    const book = await this.store.get("books", bookId);
-    const updated = await this.store.update("books", bookId, { pdf_file_id: null, pdf_filename: null });
-    if (book.pdf_file_id) await this.deleteReadingBlob(String(book.pdf_file_id));
-    return updated;
-  }
-
-  async saveCover(bookId: string, content: Buffer, contentType: string, originalName: string): Promise<Entity> {
-    if (content.byteLength > 10 * 1024 * 1024) throw new ReadingValidationError("封面图片不能超过 10 MB");
-    const extension = detectImage(content, contentType);
-    if (!extension) throw new ReadingValidationError("请选择 PNG、JPEG 或 WebP 封面图片");
-    const book = await this.store.get("books", bookId);
-    const uploaded = await this.blob.put(`reading/books/${bookId}/cover.${extension}`, content, {
-      access: "private",
-      addRandomSuffix: true,
-      contentType,
+    const updated = await this.store.transaction(async (store) => {
+      const book = await store.getForUpdate("books", bookId);
+      if (typeof book.pdf_file_id === "string") await store.enqueueBlobCleanup(book.pdf_file_id, "remove-pdf");
+      return store.update("books", bookId, { pdf_file_id: null, pdf_filename: null });
     });
-    let updated: Entity;
-    try {
-      updated = await this.store.update("books", bookId, {
-        cover_file_id: uploaded.pathname,
-        cover_filename: safeDisplayName(originalName, `cover.${extension}`),
-      });
-    } catch (error) {
-      await this.blob.del(uploaded.pathname).catch(() => undefined);
-      throw error;
-    }
-    if (book.cover_file_id && book.cover_file_id !== uploaded.pathname) await this.deleteReadingBlob(String(book.cover_file_id));
+    await this.retryPendingCleanup();
     return updated;
   }
 
@@ -116,17 +130,49 @@ export class CloudReadingFileManager {
   }
 
   async removeCover(bookId: string): Promise<Entity> {
-    const book = await this.store.get("books", bookId);
-    const updated = await this.store.update("books", bookId, { cover_file_id: null, cover_filename: null });
-    if (book.cover_file_id) await this.deleteReadingBlob(String(book.cover_file_id));
+    const updated = await this.store.transaction(async (store) => {
+      const book = await store.getForUpdate("books", bookId);
+      if (typeof book.cover_file_id === "string") await store.enqueueBlobCleanup(book.cover_file_id, "remove-cover");
+      return store.update("books", bookId, { cover_file_id: null, cover_filename: null });
+    });
+    await this.retryPendingCleanup();
     return updated;
   }
 
-  async removeBookFiles(book: Entity): Promise<void> {
-    const pathnames = [book.pdf_file_id, book.cover_file_id]
-      .filter((value): value is string => typeof value === "string")
-      .map((value) => this.readingPath(value));
-    if (pathnames.length) await Promise.all(pathnames.map((pathname) => this.blob.del(pathname)));
+  async permanentDeleteBook(bookId: string): Promise<void> {
+    await this.store.transaction(async (store) => {
+      const book = await store.getForUpdate("books", bookId, true);
+      if (typeof book.pdf_file_id === "string") await store.enqueueBlobCleanup(book.pdf_file_id, "delete-book-pdf");
+      if (typeof book.cover_file_id === "string") await store.enqueueBlobCleanup(book.cover_file_id, "delete-book-cover");
+      await store.permanentDelete("books", bookId);
+    });
+    await this.retryPendingCleanup();
+  }
+
+  async retryPendingCleanup(limit = 20): Promise<void> {
+    const records = await this.store.listBlobCleanup(limit);
+    for (const record of records) {
+      try {
+        await this.blob.del(this.readingPath(record.pathname));
+        await this.store.completeBlobCleanup(record.pathname);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Blob cleanup failed";
+        await this.store.failBlobCleanup(record.pathname, message.slice(0, 500));
+      }
+    }
+  }
+
+  private completedPath(payload: UploadPayload, pathname: string, contentType: string): string {
+    if (contentType !== payload.contentType) throw new ReadingValidationError("上传文件类型无效");
+    const requested = requestedPath(payload);
+    const extension = requested.slice(requested.lastIndexOf("."));
+    const stem = requested.slice(0, -extension.length);
+    const escapedStem = escapeRegExp(stem);
+    const escapedExtension = escapeRegExp(extension);
+    if (!new RegExp(`^${escapedStem}(?:-[A-Za-z0-9]+)?${escapedExtension}$`).test(pathname)) {
+      throw new ReadingValidationError("上传路径无效");
+    }
+    return this.bookPath(payload.bookId, pathname);
   }
 
   private bookPath(bookId: string, pathname: string): string {
@@ -141,20 +187,45 @@ export class CloudReadingFileManager {
     }
     return pathname;
   }
-
-  private async deleteReadingBlob(pathname: string): Promise<void> {
-    await this.blob.del(this.readingPath(pathname));
-  }
 }
 
-function detectImage(content: Buffer, contentType: string): "png" | "jpg" | "webp" | null {
-  if (content.length >= 8 && content.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) && contentType === "image/png") return "png";
-  if (content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff && contentType === "image/jpeg") return "jpg";
-  if (content.length >= 12 && content.subarray(0, 4).toString("ascii") === "RIFF" && content.subarray(8, 12).toString("ascii") === "WEBP" && contentType === "image/webp") return "webp";
-  return null;
+function requestedPath(payload: UploadPayload): string {
+  if (payload.kind === "pdf") return `reading/books/${payload.bookId}/book.pdf`;
+  return `reading/books/${payload.bookId}/cover.${coverExtensions.get(payload.contentType)}`;
+}
+
+function parseUploadPayload(value: string | null): UploadPayload {
+  let parsed: unknown;
+  try {
+    parsed = value ? JSON.parse(value) : null;
+  } catch {
+    throw new ReadingValidationError("上传信息无效");
+  }
+  if (!parsed || typeof parsed !== "object") throw new ReadingValidationError("上传信息无效");
+  const input = parsed as Record<string, unknown>;
+  const bookId = typeof input.bookId === "string" ? input.bookId.trim() : "";
+  const kind = input.kind;
+  const contentType = typeof input.contentType === "string" ? input.contentType : "";
+  if (!bookId || bookId.includes("/") || bookId.includes("\\") || bookId.includes("..")) {
+    throw new ReadingValidationError("上传信息无效");
+  }
+  if (kind !== "pdf" && kind !== "cover") throw new ReadingValidationError("上传信息无效");
+  if (kind === "pdf" && contentType !== "application/pdf") throw new ReadingValidationError("请选择有效的 PDF 文件");
+  if (kind === "cover" && !coverExtensions.has(contentType)) throw new ReadingValidationError("请选择 PNG、JPEG 或 WebP 封面图片");
+  const fallback = kind === "pdf" ? "book.pdf" : `cover.${coverExtensions.get(contentType)}`;
+  return {
+    bookId,
+    kind,
+    contentType,
+    originalName: safeDisplayName(typeof input.originalName === "string" ? input.originalName : undefined, fallback),
+  };
 }
 
 function safeDisplayName(value: string | undefined, fallback: string): string {
   const name = path.basename(value || fallback).replace(/[\r\n"]/g, "").trim();
   return name || fallback;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

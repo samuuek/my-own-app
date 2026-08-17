@@ -15,6 +15,12 @@ import {
 } from "./store-validation.js";
 
 type PayloadRow = { payload: Entity | string };
+export type BlobCleanupRecord = {
+  pathname: string;
+  reason: string;
+  attempts: number;
+  last_error: string | null;
+};
 type TransactionalQueryable = Queryable & {
   transaction<T>(work: (queryable: Queryable) => Promise<T>): Promise<T>;
 };
@@ -146,6 +152,41 @@ export class CloudStore {
       DELETE FROM workspace_entities
       WHERE collection = $1 AND id = $2 AND deleted_at IS NOT NULL
     `, [name, id]);
+  }
+
+  async enqueueBlobCleanup(pathname: string, reason: string): Promise<void> {
+    await this.queryable.query(`
+      INSERT INTO workspace_blob_cleanup(pathname, reason)
+      VALUES ($1, $2)
+      ON CONFLICT(pathname) DO UPDATE SET
+        reason = EXCLUDED.reason,
+        next_attempt_at = now()
+    `, [pathname, reason]);
+  }
+
+  async listBlobCleanup(limit = 20): Promise<BlobCleanupRecord[]> {
+    const result = await this.queryable.query<BlobCleanupRecord>(`
+      SELECT pathname, reason, attempts, last_error
+      FROM workspace_blob_cleanup
+      WHERE next_attempt_at <= now()
+      ORDER BY next_attempt_at, created_at
+      LIMIT $1
+    `, [limit]);
+    return result.rows;
+  }
+
+  async completeBlobCleanup(pathname: string): Promise<void> {
+    await this.queryable.query("DELETE FROM workspace_blob_cleanup WHERE pathname = $1", [pathname]);
+  }
+
+  async failBlobCleanup(pathname: string, message: string): Promise<void> {
+    await this.queryable.query(`
+      UPDATE workspace_blob_cleanup
+      SET attempts = attempts + 1,
+          last_error = $2,
+          next_attempt_at = now()
+      WHERE pathname = $1
+    `, [pathname, message]);
   }
 
   async trash(): Promise<Entity[]> {

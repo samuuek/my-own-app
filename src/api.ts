@@ -1,4 +1,5 @@
 import type { CollectionName, WorkspaceState, DashboardData, BackupRecord, Entity, FocusTimerSnapshot } from "./types";
+import { upload } from "@vercel/blob/client";
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -39,6 +40,32 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return result.data as T;
 }
 
+async function readingUploadMode(): Promise<"desktop" | "cloud"> {
+  const status = await request<SystemStatus>("/api/system/status");
+  return status.mode === "desktop" ? "desktop" : "cloud";
+}
+
+async function uploadBookFile(id: string, file: File, kind: "pdf" | "cover"): Promise<void> {
+  if (await readingUploadMode() === "desktop") {
+    await request<Entity>(`/api/books/${id}/${kind}`, {
+      method: "PUT",
+      headers: { "Content-Type": kind === "pdf" ? "application/pdf" : file.type, "X-File-Name": file.name },
+      body: file,
+    });
+    return;
+  }
+  const extension = kind === "pdf" ? "pdf" : ({ "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" } as const)[file.type as "image/png" | "image/jpeg" | "image/webp"];
+  if (!extension || (kind === "pdf" && file.type !== "application/pdf")) {
+    throw new ApiError(kind === "pdf" ? "请选择有效的 PDF 文件" : "请选择 PNG、JPEG 或 WebP 封面图片", 400);
+  }
+  await upload(`reading/books/${id}/${kind === "pdf" ? "book" : "cover"}.${extension}`, file, {
+    access: "private",
+    handleUploadUrl: "/api/blob/upload",
+    clientPayload: JSON.stringify({ bookId: id, kind, contentType: file.type, originalName: file.name }),
+    multipart: true,
+  });
+}
+
 export const api = {
   state: () => request<WorkspaceState>("/api/state"),
   dashboard: (date: string) => request<DashboardData>(`/api/dashboard?date=${encodeURIComponent(date)}`),
@@ -67,9 +94,9 @@ export const api = {
     request<{ reflection: Entity; actions: Entity[] }>("/api/reflections/daily", { method: "PUT", body: JSON.stringify(input) }),
   addReflectionActionToPlan: (id: string) =>
     request<Entity>(`/api/reflection-actions/${id}/add-to-plan`, { method: "POST" }),
-  uploadBookPdf: (id: string, file: File) => request<Entity>(`/api/books/${id}/pdf`, { method: "PUT", headers: { "Content-Type": "application/pdf", "X-File-Name": file.name }, body: file }),
+  uploadBookPdf: (id: string, file: File) => uploadBookFile(id, file, "pdf"),
   removeBookPdf: (id: string) => request<Entity>(`/api/books/${id}/pdf`, { method: "DELETE" }),
-  uploadBookCover: (id: string, file: File) => request<Entity>(`/api/books/${id}/cover`, { method: "PUT", headers: { "Content-Type": file.type, "X-File-Name": file.name }, body: file }),
+  uploadBookCover: (id: string, file: File) => uploadBookFile(id, file, "cover"),
   removeBookCover: (id: string) => request<Entity>(`/api/books/${id}/cover`, { method: "DELETE" }),
   postponePlan: (id: string, date: string) =>
     request<Entity>(`/api/plan-items/${id}/postpone`, { method: "POST", body: JSON.stringify({ date }) }),

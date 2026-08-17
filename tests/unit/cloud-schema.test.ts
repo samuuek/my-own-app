@@ -14,6 +14,7 @@ describe("cloud workspace schema", () => {
       "workspace_entities",
       "workspace_settings",
       "workspace_daily_reviews",
+      "workspace_blob_cleanup",
       "PRIMARY KEY (collection, id)",
       "payload JSONB",
       "jsonb_typeof(payload) = 'object'",
@@ -23,6 +24,7 @@ describe("cloud workspace schema", () => {
       "idx_workspace_entities_active",
       "idx_workspace_entities_updated",
       "uq_workspace_active_focus_timer",
+      "idx_workspace_blob_cleanup_due",
     ]) {
       expect(schema).toContain(requiredFragment);
     }

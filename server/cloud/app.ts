@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyStatic from "@fastify/static";
+import { handleUpload, type HandleUploadBody, type HandleUploadOptions } from "@vercel/blob/client";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { z } from "zod";
@@ -12,14 +13,15 @@ import { CloudExportService } from "./export.js";
 import { CloudFocusTimerService } from "./focus-timer.js";
 import { CloudReadingFileManager } from "./reading-files.js";
 import { CloudStore } from "./store.js";
-import { cloudSystemStatus, DesktopOnlyError, isAllowedWriteOrigin } from "./system.js";
+import { cloudSystemStatus, DesktopOnlyError, DirectUploadRequiredError, isAllowedWriteOrigin } from "./system.js";
 import { CloudWorkflowService } from "./workflows.js";
 
 const bodySchema = z.record(z.string(), z.unknown());
 
 type FocusTimers = Pick<CloudFocusTimerService, "current" | "start" | "pause" | "resume" | "finish">;
-type ReadingFiles = Pick<CloudReadingFileManager, "savePdf" | "readPdf" | "removePdf" | "saveCover" | "readCover" | "removeCover" | "removeBookFiles">;
+type ReadingFiles = Pick<CloudReadingFileManager, "authorizeUpload" | "completeUpload" | "readPdf" | "removePdf" | "readCover" | "removeCover" | "permanentDeleteBook" | "retryPendingCleanup">;
 type ExportService = Pick<CloudExportService, "create" | "read">;
+type ClientUploadHandler = (options: HandleUploadOptions) => ReturnType<typeof handleUpload>;
 
 export type BuildCloudAppOptions = {
   store?: CloudStore;
@@ -28,19 +30,25 @@ export type BuildCloudAppOptions = {
   exports?: ExportService;
   logger?: boolean;
   serveStatic?: boolean;
+  clientUploads?: ClientUploadHandler;
 };
 
 export async function buildCloudApp(options: BuildCloudAppOptions = {}): Promise<FastifyInstance> {
+  const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 * 1024 * 1024 });
+  return configureCloudApp(app, options);
+}
+
+export async function configureCloudApp(app: FastifyInstance, options: BuildCloudAppOptions = {}): Promise<FastifyInstance> {
   const store = options.store ?? createDefaultStore();
   const focusTimers = options.focusTimers ?? new CloudFocusTimerService(store);
   const files = options.files ?? new CloudReadingFileManager(store);
   const exports = options.exports ?? new CloudExportService(store);
+  const clientUploads = options.clientUploads ?? handleUpload;
   const workflows = new CloudWorkflowService(store);
-  const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 * 1024 * 1024 });
 
-  app.addContentTypeParser("application/pdf", { parseAs: "buffer", bodyLimit: 100 * 1024 * 1024 }, (_request, body, done) => done(null, body));
+  app.addContentTypeParser("application/pdf", { parseAs: "buffer", bodyLimit: 1024 }, (_request, body, done) => done(null, body));
   for (const type of ["image/png", "image/jpeg", "image/webp"]) {
-    app.addContentTypeParser(type, { parseAs: "buffer", bodyLimit: 10 * 1024 * 1024 }, (_request, body, done) => done(null, body));
+    app.addContentTypeParser(type, { parseAs: "buffer", bodyLimit: 1024 }, (_request, body, done) => done(null, body));
   }
 
   app.addHook("onRequest", async (request, reply) => {
@@ -75,6 +83,13 @@ export async function buildCloudApp(options: BuildCloudAppOptions = {}): Promise
       database: "connected",
       now: new Date().toISOString(),
     },
+  }));
+
+  app.post("/api/blob/upload", async (request) => clientUploads({
+    request: request.raw,
+    body: request.body as HandleUploadBody,
+    onBeforeGenerateToken: (pathname, clientPayload, multipart) => files.authorizeUpload(pathname, clientPayload, multipart),
+    onUploadCompleted: (payload) => files.completeUpload(payload),
   }));
 
   app.get("/api/state", async () => ({ data: await store.state() }));
@@ -139,9 +154,8 @@ export async function buildCloudApp(options: BuildCloudAppOptions = {}): Promise
   app.delete("/api/collections/:collection/:id/permanent", async (request, reply) => {
     const { collection, id } = request.params as { collection: string; id: string };
     assertCollection(collection);
-    const readingBook = collection === "books" ? await store.get("books", id, true) : null;
-    await store.permanentDelete(collection, id);
-    if (readingBook) await files.removeBookFiles(readingBook);
+    if (collection === "books") await files.permanentDeleteBook(id);
+    else await store.permanentDelete(collection, id);
     return reply.code(204).send();
   });
 
@@ -175,8 +189,8 @@ export async function buildCloudApp(options: BuildCloudAppOptions = {}): Promise
   });
 
   app.put("/api/books/:id/pdf", async (request) => {
-    const { id } = request.params as { id: string };
-    return { data: await files.savePdf(id, request.body as Buffer, String(request.headers["x-file-name"] ?? "book.pdf")) };
+    void request;
+    throw new DirectUploadRequiredError();
   });
   app.get("/api/books/:id/pdf", async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -190,8 +204,8 @@ export async function buildCloudApp(options: BuildCloudAppOptions = {}): Promise
     return { data: await files.removePdf(id) };
   });
   app.put("/api/books/:id/cover", async (request) => {
-    const { id } = request.params as { id: string };
-    return { data: await files.saveCover(id, request.body as Buffer, String(request.headers["content-type"] ?? ""), String(request.headers["x-file-name"] ?? "cover")) };
+    void request;
+    throw new DirectUploadRequiredError();
   });
   app.get("/api/books/:id/cover", async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -231,7 +245,10 @@ export async function buildCloudApp(options: BuildCloudAppOptions = {}): Promise
 
   app.get("/api/system/status", async () => ({ data: cloudSystemStatus() }));
   app.get("/api/system/data-file", async () => { throw new DesktopOnlyError(); });
-  app.post("/api/system/save", async () => ({ data: { savedAt: new Date().toISOString(), database: "connected", runtime: "cloud" } }));
+  app.post("/api/system/save", async () => {
+    await files.retryPendingCleanup();
+    return { data: { savedAt: new Date().toISOString(), database: "connected", runtime: "cloud" } };
+  });
   app.post("/api/system/save-and-exit", async () => { throw new DesktopOnlyError(); });
   app.post("/api/system/open-data-directory", async () => { throw new DesktopOnlyError(); });
   app.post("/api/system/open-path", async () => { throw new DesktopOnlyError(); });

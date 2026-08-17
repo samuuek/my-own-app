@@ -1,3 +1,8 @@
-import { buildCloudApp } from "./server/cloud/app.js";
+import Fastify from "fastify";
+import { configureCloudApp } from "./server/cloud/app.js";
 
-export default await buildCloudApp({ serveStatic: true });
+const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 });
+await configureCloudApp(app, { serveStatic: true });
+await app.listen({ port: Number(process.env.PORT) || 3000, host: "0.0.0.0" });
+
+export default app;

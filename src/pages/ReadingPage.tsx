@@ -55,8 +55,16 @@ function BookDetail({ book, data, run, back, dialog, setDialog, readingOpen, set
   const minutes = sessions.reduce((sum: number, item: Entity) => sum + Number(item.duration_minutes || 0), 0);
   const fileInput = useRef<HTMLInputElement>(null);
   const coverInput = useRef<HTMLInputElement>(null);
-  const upload = async (file?: File) => { if (file) await run(() => api.uploadBookPdf(book.id, file)); };
-  const uploadCover = async (file?: File) => { if (file) await run(() => api.uploadBookCover(book.id, file)); };
+  const upload = async (file?: File) => {
+    if (!file) return;
+    try { await run(() => api.uploadBookPdf(book.id, file)); }
+    finally { if (fileInput.current) fileInput.current.value = ""; }
+  };
+  const uploadCover = async (file?: File) => {
+    if (!file) return;
+    try { await run(() => api.uploadBookCover(book.id, file)); }
+    finally { if (coverInput.current) coverInput.current.value = ""; }
+  };
   return <>
     <PageHeader icon={<ModuleArtwork module="reading" />} eyebrow={book.author || "作者未填写"} title={book.title} description={book.description || "记录阅读进度，并把感受沉淀为自己的思考。"} actions={<><Button variant="ghost" onClick={back}><ArrowLeft size={16} />返回书架</Button><Button variant="secondary" onClick={() => coverInput.current?.click()}><UploadSimple size={16} />上传封面</Button><input ref={coverInput} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void uploadCover(event.target.files?.[0])} /><Button variant="secondary" onClick={() => setDialog({ type: "book", item: book })}><PencilSimple size={16} />编辑资料</Button><Button variant="ghost" onClick={() => void run(() => api.remove("books", book.id)).then(back)}><Trash size={16} />删除书籍</Button></>} />
     <div className="reading-stats"><article><strong>{completion === null ? "—" : `${completion}%`}</strong><span>完成进度</span></article><article><strong>{pagesRead}</strong><span>累计阅读页</span></article><article><strong>{formatDuration(minutes)}</strong><span>累计时长</span></article><article><strong>{notes.length}</strong><span>笔记数量</span></article></div>

@@ -23,6 +23,15 @@ export class DesktopOnlyError extends Error {
   }
 }
 
+export class DirectUploadRequiredError extends Error {
+  readonly statusCode = 409;
+  readonly code = "DIRECT_UPLOAD_REQUIRED";
+
+  constructor() {
+    super("请使用浏览器直传上传阅读文件");
+  }
+}
+
 export function isAllowedWriteOrigin(
   origin: string | undefined,
   host: string | undefined,
