@@ -15,7 +15,7 @@ function byteStream(bytes: number[]): ReadableStream<Uint8Array> {
 const pdfHeader = [...new TextEncoder().encode("%PDF-1.7\n")];
 const webpHeader = [...new TextEncoder().encode("RIFFxxxxWEBP")];
 
-type Cleanup = { pathname: string; reason: string; attempts: number; last_error: string | null };
+type Cleanup = { pathname: string; reason: string; state: "pending" | "claimed"; attempts: number; last_error: string | null };
 
 function setup(book: Entity = {
   id: "book-1", title: "Cloud book",
@@ -46,10 +46,19 @@ function setup(book: Entity = {
       return true;
     }),
     transaction: vi.fn(async (work: (transactionStore: any) => Promise<any>) => work(store)),
+    lockBlobPath: vi.fn(async () => undefined),
     enqueueBlobCleanup: vi.fn(async (pathname: string, reason: string) => {
-      cleanup.set(pathname, { pathname, reason, attempts: cleanup.get(pathname)?.attempts ?? 0, last_error: null });
+      cleanup.set(pathname, { pathname, reason, state: "pending", attempts: cleanup.get(pathname)?.attempts ?? 0, last_error: null });
     }),
     listBlobCleanup: vi.fn(async () => [...cleanup.values()]),
+    getBlobCleanupForUpdate: vi.fn(async (pathname: string) => cleanup.get(pathname) ?? null),
+    claimBlobCleanup: vi.fn(async (pathname: string) => {
+      const record = cleanup.get(pathname);
+      if (!record) return false;
+      cleanup.set(pathname, { ...record, state: "claimed" });
+      return true;
+    }),
+    cancelBlobCleanup: vi.fn(async (pathname: string) => { cleanup.delete(pathname); }),
     completeBlobCleanup: vi.fn(async (pathname: string) => { cleanup.delete(pathname); }),
     failBlobCleanup: vi.fn(async (pathname: string, message: string) => {
       const record = cleanup.get(pathname)!;

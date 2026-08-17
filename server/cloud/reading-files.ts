@@ -17,6 +17,7 @@ export type CloudBlobClient = {
 type CleanupRecord = {
   pathname: string;
   reason: string;
+  state: "pending" | "claimed" | "deleted";
   attempts: number;
   last_error: string | null;
 };
@@ -27,8 +28,12 @@ type ReadingFileStore = {
   update(collection: "books", id: string, input: Entity): Promise<Entity>;
   permanentDelete(collection: "books", id: string): Promise<boolean>;
   transaction<T>(work: (store: ReadingFileStore) => Promise<T>): Promise<T>;
+  lockBlobPath(pathname: string): Promise<void>;
   enqueueBlobCleanup(pathname: string, reason: string): Promise<void>;
   listBlobCleanup(limit?: number): Promise<CleanupRecord[]>;
+  getBlobCleanupForUpdate(pathname: string): Promise<CleanupRecord | null>;
+  claimBlobCleanup(pathname: string): Promise<boolean>;
+  cancelBlobCleanup(pathname: string): Promise<void>;
   completeBlobCleanup(pathname: string): Promise<void>;
   failBlobCleanup(pathname: string, message: string): Promise<void>;
 };
@@ -94,10 +99,17 @@ export class CloudReadingFileManager {
     }
     try {
       await this.store.transaction(async (store) => {
+        await store.lockBlobPath(uploadedPath);
+        const cleanup = await store.getBlobCleanupForUpdate(uploadedPath);
+        if (cleanup?.state === "claimed" || cleanup?.state === "deleted") {
+          throw new ReadingValidationError("上传文件已失效，请重新上传");
+        }
+        if (cleanup?.state === "pending") await store.cancelBlobCleanup(uploadedPath);
         const book = await store.getForUpdate("books", payload.bookId);
         const field = payload.kind === "pdf" ? "pdf_file_id" : "cover_file_id";
         const filenameField = payload.kind === "pdf" ? "pdf_filename" : "cover_filename";
         const oldPath = book[field];
+        if (oldPath === uploadedPath) return;
         if (typeof oldPath === "string" && oldPath !== uploadedPath) {
           await store.enqueueBlobCleanup(oldPath, payload.kind === "pdf" ? "replace-pdf" : "replace-cover");
         }
@@ -166,18 +178,38 @@ export class CloudReadingFileManager {
   async retryPendingCleanup(limit = 20): Promise<void> {
     const records = await this.store.listBlobCleanup(limit);
     for (const record of records) {
+      const pathname = this.readingPath(record.pathname);
+      const bookId = pathname.split("/")[2];
+      let claimed: boolean;
       try {
-        const pathname = this.readingPath(record.pathname);
-        const bookId = pathname.split("/")[2];
-        if (await this.isCurrentAttachment(bookId, pathname)) {
-          await this.store.completeBlobCleanup(pathname);
-          continue;
-        }
+        claimed = await this.store.transaction(async (store) => {
+          await store.lockBlobPath(pathname);
+          const cleanup = await store.getBlobCleanupForUpdate(pathname);
+          if (!cleanup || cleanup.state === "deleted") return false;
+          if (await this.isCurrentAttachment(store, bookId, pathname)) {
+            await store.cancelBlobCleanup(pathname);
+            return false;
+          }
+          return store.claimBlobCleanup(pathname);
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Blob cleanup claim failed";
+        await this.store.failBlobCleanup(pathname, message.slice(0, 500));
+        continue;
+      }
+      if (!claimed) continue;
+      try {
         await this.blob.del(pathname);
-        await this.store.completeBlobCleanup(record.pathname);
+        await this.store.transaction(async (store) => {
+          await store.lockBlobPath(pathname);
+          await store.completeBlobCleanup(pathname);
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Blob cleanup failed";
-        await this.store.failBlobCleanup(record.pathname, message.slice(0, 500));
+        await this.store.transaction(async (store) => {
+          await store.lockBlobPath(pathname);
+          await store.failBlobCleanup(pathname, message.slice(0, 500));
+        });
       }
     }
   }
@@ -215,9 +247,9 @@ export class CloudReadingFileManager {
     await this.retryPendingCleanup();
   }
 
-  private async isCurrentAttachment(bookId: string, pathname: string): Promise<boolean> {
+  private async isCurrentAttachment(store: ReadingFileStore, bookId: string, pathname: string): Promise<boolean> {
     try {
-      const book = await this.store.get("books", bookId, true);
+      const book = await store.get("books", bookId, true);
       return book.pdf_file_id === pathname || book.cover_file_id === pathname;
     } catch (error) {
       if (error instanceof NotFoundError) return false;

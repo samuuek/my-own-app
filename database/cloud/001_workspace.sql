@@ -35,10 +35,12 @@ CREATE TABLE IF NOT EXISTS workspace_daily_reviews (
 CREATE TABLE IF NOT EXISTS workspace_blob_cleanup (
   pathname text PRIMARY KEY,
   reason text NOT NULL,
+  state text NOT NULL DEFAULT 'pending',
   created_at timestamptz NOT NULL DEFAULT now(),
   attempts integer NOT NULL DEFAULT 0,
   last_error text,
-  next_attempt_at timestamptz NOT NULL DEFAULT now()
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (state IN ('pending', 'claimed', 'deleted'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_workspace_entities_active

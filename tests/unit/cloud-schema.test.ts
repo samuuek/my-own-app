@@ -15,6 +15,8 @@ describe("cloud workspace schema", () => {
       "workspace_settings",
       "workspace_daily_reviews",
       "workspace_blob_cleanup",
+      "state text NOT NULL DEFAULT 'pending'",
+      "CHECK (state IN ('pending', 'claimed', 'deleted'))",
       "PRIMARY KEY (collection, id)",
       "payload JSONB",
       "jsonb_typeof(payload) = 'object'",

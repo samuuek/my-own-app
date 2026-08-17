@@ -154,6 +154,14 @@ describe("CloudStore validation and JSONB persistence", () => {
 });
 
 describe("CloudStore transaction binding", () => {
+  it("uses a parameterized transaction advisory lock for a Blob pathname", async () => {
+    const database = new RecordingDatabase(() => ({ rows: [] }));
+    const store = new CloudStore(database);
+    await store.transaction((transactionStore) => transactionStore.lockBlobPath("reading/books/book-1/book.pdf"));
+    expect(database.transactionCalls[0].text).toContain("pg_advisory_xact_lock");
+    expect(database.transactionCalls[0].values).toEqual(["workspace_blob_cleanup", "reading/books/book-1/book.pdf"]);
+  });
+
   it.each([
     [true, [{ id: "book-1" }]],
     [false, []],

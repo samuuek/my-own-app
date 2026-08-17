@@ -18,6 +18,7 @@ type PayloadRow = { payload: Entity | string };
 export type BlobCleanupRecord = {
   pathname: string;
   reason: string;
+  state: "pending" | "claimed" | "deleted";
   attempts: number;
   last_error: string | null;
 };
@@ -161,24 +162,68 @@ export class CloudStore {
       INSERT INTO workspace_blob_cleanup(pathname, reason)
       VALUES ($1, $2)
       ON CONFLICT(pathname) DO UPDATE SET
-        reason = EXCLUDED.reason,
-        next_attempt_at = now()
+        reason = CASE WHEN workspace_blob_cleanup.state = 'pending' THEN EXCLUDED.reason ELSE workspace_blob_cleanup.reason END,
+        next_attempt_at = CASE WHEN workspace_blob_cleanup.state = 'pending' THEN now() ELSE workspace_blob_cleanup.next_attempt_at END
     `, [pathname, reason]);
   }
 
   async listBlobCleanup(limit = 20): Promise<BlobCleanupRecord[]> {
     const result = await this.queryable.query<BlobCleanupRecord>(`
-      SELECT pathname, reason, attempts, last_error
+      SELECT pathname, reason, state, attempts, last_error
       FROM workspace_blob_cleanup
-      WHERE next_attempt_at <= now()
+      WHERE state IN ('pending', 'claimed') AND next_attempt_at <= now()
       ORDER BY next_attempt_at, created_at
       LIMIT $1
     `, [limit]);
     return result.rows;
   }
 
+  async lockBlobPath(pathname: string): Promise<void> {
+    if (!this.transactionBound) throw new Error("CloudStore.lockBlobPath requires an active transaction");
+    await this.queryable.query(
+      "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+      ["workspace_blob_cleanup", pathname],
+    );
+  }
+
+  async getBlobCleanupForUpdate(pathname: string): Promise<BlobCleanupRecord | null> {
+    if (!this.transactionBound) throw new Error("CloudStore.getBlobCleanupForUpdate requires an active transaction");
+    const result = await this.queryable.query<BlobCleanupRecord>(`
+      SELECT pathname, reason, state, attempts, last_error
+      FROM workspace_blob_cleanup
+      WHERE pathname = $1
+      FOR UPDATE
+    `, [pathname]);
+    return result.rows[0] ?? null;
+  }
+
+  async claimBlobCleanup(pathname: string): Promise<boolean> {
+    if (!this.transactionBound) throw new Error("CloudStore.claimBlobCleanup requires an active transaction");
+    const result = await this.queryable.query<{ pathname: string }>(`
+      UPDATE workspace_blob_cleanup
+      SET state = 'claimed',
+          next_attempt_at = now() + interval '5 minutes'
+      WHERE pathname = $1
+        AND state IN ('pending', 'claimed')
+        AND next_attempt_at <= now()
+      RETURNING pathname
+    `, [pathname]);
+    return result.rows.length > 0;
+  }
+
+  async cancelBlobCleanup(pathname: string): Promise<void> {
+    await this.queryable.query(`
+      DELETE FROM workspace_blob_cleanup
+      WHERE pathname = $1 AND state = 'pending'
+    `, [pathname]);
+  }
+
   async completeBlobCleanup(pathname: string): Promise<void> {
-    await this.queryable.query("DELETE FROM workspace_blob_cleanup WHERE pathname = $1", [pathname]);
+    await this.queryable.query(`
+      UPDATE workspace_blob_cleanup
+      SET state = 'deleted', last_error = NULL
+      WHERE pathname = $1 AND state = 'claimed'
+    `, [pathname]);
   }
 
   async failBlobCleanup(pathname: string, message: string): Promise<void> {
@@ -186,8 +231,9 @@ export class CloudStore {
       UPDATE workspace_blob_cleanup
       SET attempts = attempts + 1,
           last_error = $2,
+          state = 'claimed',
           next_attempt_at = now()
-      WHERE pathname = $1
+      WHERE pathname = $1 AND state = 'claimed'
     `, [pathname, message]);
   }
 
