@@ -20,13 +20,13 @@ export type MigrationCloudDatabase = Queryable & {
 type PrivateUploadOptions = {
   access: "private";
   addRandomSuffix: false;
-  allowOverwrite: true;
+  allowOverwrite: false;
   contentType: string;
 };
 
 export type MigrationUploader = {
   upload(pathname: string, content: Buffer, options: PrivateUploadOptions): Promise<void>;
-  exists(pathname: string): Promise<boolean>;
+  inspect(pathname: string): Promise<{ size: number; contentType: string } | null>;
   delete(pathname: string): Promise<void>;
 };
 
@@ -51,12 +51,12 @@ const defaultUploader: MigrationUploader = {
   upload: async (pathname, content, options) => {
     await put(pathname, content, options);
   },
-  exists: async (pathname) => {
+  inspect: async (pathname) => {
     try {
-      await head(pathname);
-      return true;
+      const blob = await head(pathname);
+      return { size: blob.size, contentType: blob.contentType };
     } catch (error) {
-      if (error instanceof BlobNotFoundError) return false;
+      if (error instanceof BlobNotFoundError) return null;
       throw error;
     }
   },
@@ -149,21 +149,38 @@ async function uploadAttachments(
   });
   const newlyUploaded: string[] = [];
   for (const { attachment, content } of prepared) {
-    const existed = await uploader.exists(attachment.pathname);
+    const existing = await uploader.inspect(attachment.pathname);
+    if (existing) {
+      assertMatchingBlobMetadata(attachment, existing);
+      continue;
+    }
     try {
       await uploader.upload(attachment.pathname, content, {
         access: "private",
         addRandomSuffix: false,
-        allowOverwrite: true,
+        allowOverwrite: false,
         contentType: attachment.contentType,
       });
-      if (!existed) newlyUploaded.push(attachment.pathname);
+      newlyUploaded.push(attachment.pathname);
     } catch (error) {
-      if (!existed && await uploader.exists(attachment.pathname)) newlyUploaded.push(attachment.pathname);
+      const raced = await uploader.inspect(attachment.pathname);
+      if (raced) {
+        assertMatchingBlobMetadata(attachment, raced);
+        continue;
+      }
       throw Object.assign(error instanceof Error ? error : new Error("附件上传失败"), { newlyUploaded });
     }
   }
   return newlyUploaded;
+}
+
+function assertMatchingBlobMetadata(
+  attachment: MigrationAttachment,
+  metadata: { size: number; contentType: string },
+): void {
+  if (metadata.size !== attachment.size || metadata.contentType !== attachment.contentType) {
+    throw new Error(`已存在的 Blob 与迁移附件不一致：${attachment.pathname}`);
+  }
 }
 
 async function preserveCleanupIntent(
@@ -171,6 +188,7 @@ async function preserveCleanupIntent(
   uploader: MigrationUploader,
   pathnames: string[],
 ): Promise<void> {
+  const cleanupErrors: Error[] = [];
   for (const pathname of pathnames) {
     try {
       await database.query(`
@@ -187,10 +205,11 @@ async function preserveCleanupIntent(
       try {
         await uploader.delete(pathname);
       } catch (deleteError) {
-        throw new AggregateError([outboxError, deleteError], `迁移失败且附件清理需要人工处理：${pathname}`);
+        cleanupErrors.push(new AggregateError([outboxError, deleteError], `迁移失败且附件清理需要人工处理：${pathname}`));
       }
     }
   }
+  if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, "迁移失败且部分附件清理需要人工处理");
 }
 
 function parseArguments(argv: string[]): Record<string, string | boolean> {

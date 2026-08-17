@@ -98,6 +98,8 @@ export function exportMigrationPackage(options: ExportMigrationOptions): Migrati
     database.close();
   }
   const attachments = collectAttachments(collections.books, options.attachmentsDirectory);
+  assertAttachmentOutputSafety(attachments, options.attachmentsDirectory, outputPath);
+  verifyAttachmentSources(attachments, options.attachmentsDirectory);
   applyCloudAttachmentPaths(collections.books, attachments);
   if (hashFile(databasePath) !== sourceHashBefore) throw new Error("SQLite 备份在导出期间发生变化，已停止迁移");
   const counts = Object.fromEntries(collectionNames.map((name) => [name, countRows(collections[name])])) as Record<CollectionName, MigrationCount>;
@@ -119,8 +121,10 @@ export function exportMigrationPackage(options: ExportMigrationOptions): Migrati
   if (!options.dryRun) {
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     assertDistinctOutput(databasePath, outputPath);
+    assertAttachmentOutputSafety(attachments, options.attachmentsDirectory, outputPath);
     fs.writeFileSync(outputPath, `${JSON.stringify(pkg, null, 2)}\n`, { encoding: "utf8", flag: "w" });
     if (hashFile(databasePath) !== sourceHashBefore) throw new Error("SQLite 备份在导出期间发生变化，已停止迁移");
+    verifyAttachmentSources(attachments, options.attachmentsDirectory);
   }
   return pkg;
 }
@@ -204,7 +208,6 @@ function collectAttachments(books: MigrationEntity[], attachmentsDirectory?: str
   if (!attachmentsDirectory) throw new Error("备份包含阅读附件；必须显式指定附件目录");
   return references.map((reference) => {
     const contentType = attachmentContentType(reference.kind, reference.fileId);
-    const pathname = cloudAttachmentPath(reference.bookId, reference.fileId);
     const inspected = readValidatedAttachment({
       attachmentsDirectory,
       fileId: reference.fileId,
@@ -213,12 +216,39 @@ function collectAttachments(books: MigrationEntity[], attachmentsDirectory?: str
     });
     return {
       ...reference,
-      pathname,
+      pathname: cloudAttachmentPath(reference.bookId, reference.fileId, inspected.sha256),
       size: inspected.content.byteLength,
       sha256: inspected.sha256,
       contentType,
     };
   }).sort((left, right) => left.pathname.localeCompare(right.pathname));
+}
+
+function assertAttachmentOutputSafety(
+  attachments: MigrationAttachment[],
+  attachmentsDirectory: string | undefined,
+  outputPath: string,
+): void {
+  if (attachments.length === 0) return;
+  if (!attachmentsDirectory) throw new Error("迁移附件目录无效");
+  for (const attachment of attachments) {
+    assertDistinctOutput(path.resolve(attachmentsDirectory, attachment.fileId), outputPath);
+  }
+}
+
+function verifyAttachmentSources(attachments: MigrationAttachment[], attachmentsDirectory?: string): void {
+  if (attachments.length === 0) return;
+  if (!attachmentsDirectory) throw new Error("迁移附件目录无效");
+  for (const attachment of attachments) {
+    readValidatedAttachment({
+      attachmentsDirectory,
+      fileId: attachment.fileId,
+      kind: attachment.kind,
+      contentType: attachment.contentType,
+      expectedSize: attachment.size,
+      expectedSha256: attachment.sha256,
+    });
+  }
 }
 
 export function readValidatedAttachment(options: {
@@ -287,9 +317,10 @@ function applyCloudAttachmentPaths(books: MigrationEntity[], attachments: Migrat
   }
 }
 
-function cloudAttachmentPath(bookId: string, fileId: string): string {
+function cloudAttachmentPath(bookId: string, fileId: string, digest: string): string {
   if (!isSafePathSegment(bookId) || !isSafePathSegment(fileId)) throw new Error("迁移附件路径无效");
-  return `reading/books/${bookId}/${fileId}`;
+  if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error("迁移附件校验值无效");
+  return `reading/books/${bookId}/${digest}${path.extname(fileId).toLowerCase()}`;
 }
 
 function attachmentReference(book: MigrationEntity, kind: "pdf" | "cover") {
@@ -338,8 +369,9 @@ function validateDailyReview(value: unknown): void {
 function validateAttachment(value: unknown): void {
   if (!isRecord(value) || typeof value.bookId !== "string" || !isSafePathSegment(value.bookId) || (value.kind !== "pdf" && value.kind !== "cover")
     || typeof value.fileId !== "string" || !isSafePathSegment(value.fileId) || typeof value.filename !== "string"
-    || typeof value.pathname !== "string" || value.pathname !== cloudAttachmentPath(value.bookId, value.fileId)
-    || typeof value.size !== "number" || typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)
+    || typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)
+    || typeof value.pathname !== "string" || value.pathname !== cloudAttachmentPath(value.bookId, value.fileId, value.sha256)
+    || typeof value.size !== "number"
     || typeof value.contentType !== "string" || value.contentType !== attachmentContentType(value.kind, value.fileId)) {
     throw new Error("迁移包附件清单无效");
   }

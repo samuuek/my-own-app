@@ -76,6 +76,30 @@ describe("SQLite to cloud migration package", () => {
     reopened.close();
   });
 
+  it.each(["direct", "hardlink", "symlink"] as const)("rejects a %s output alias to a referenced attachment without corrupting it", (aliasKind) => {
+    const fixture = createFixture({ attachment: true });
+    const attachmentPath = path.join(fixture.attachmentsDirectory, "fixture.pdf");
+    const before = fileHash(attachmentPath);
+    const outputPath = aliasKind === "direct" ? attachmentPath : path.join(fixture.directory, `attachment-${aliasKind}.json`);
+    if (aliasKind === "hardlink") fs.linkSync(attachmentPath, outputPath);
+    if (aliasKind === "symlink") {
+      try {
+        fs.symlinkSync(attachmentPath, outputPath, "file");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EPERM") return;
+        throw error;
+      }
+    }
+
+    expect(() => exportMigrationPackage({
+      databasePath: fixture.databasePath,
+      outputPath,
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    })).toThrow("输出");
+    expect(fileHash(attachmentPath)).toBe(before);
+    expect(fs.readFileSync(attachmentPath, "ascii")).toContain("%PDF-");
+  });
+
   it("rejects tampered packages and keeps dry-run free of cloud writes", async () => {
     const { pkg } = exportFixture();
     const database = new MemoryCloudDatabase();
@@ -169,31 +193,59 @@ describe("SQLite to cloud migration package", () => {
     const database = new MemoryCloudDatabase();
     const upload = vi.fn(async () => undefined);
     const uploader: MigrationUploader = migrationUploader(upload);
+    const expectedPathname = `reading/books/book-with-pdf/${pkg.attachments[0].sha256}.pdf`;
 
     expect(pkg.attachments).toEqual([expect.objectContaining({
       bookId: "book-with-pdf",
       kind: "pdf",
       fileId: "fixture.pdf",
-      pathname: "reading/books/book-with-pdf/fixture.pdf",
+      pathname: expectedPathname,
       sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
     })]);
     await expect(importCloudData({ pkg, database, uploader })).rejects.toThrow("附件目录");
 
     await importCloudData({ pkg, database, uploader, attachmentsDirectory: fixture.attachmentsDirectory });
     expect(upload).toHaveBeenCalledWith(
-      "reading/books/book-with-pdf/fixture.pdf",
+      expectedPathname,
       expect.any(Buffer),
-      { access: "private", addRandomSuffix: false, allowOverwrite: true, contentType: "application/pdf" },
+      { access: "private", addRandomSuffix: false, allowOverwrite: false, contentType: "application/pdf" },
     );
     const book = database.entities.get("books:book-with-pdf")!.payload;
-    expect(book.pdf_file_id).toBe("reading/books/book-with-pdf/fixture.pdf");
+    expect(book.pdf_file_id).toBe(expectedPathname);
     const blob = {
       get: vi.fn(async () => ({ body: new ReadableStream<Uint8Array>(), contentType: "application/pdf" })),
       del: vi.fn(async () => undefined),
     };
     const manager = new CloudReadingFileManager({ get: vi.fn(async () => book) } as any, blob);
     await manager.readPdf("book-with-pdf");
-    expect(blob.get).toHaveBeenCalledWith("reading/books/book-with-pdf/fixture.pdf", { access: "private" });
+    expect(blob.get).toHaveBeenCalledWith(expectedPathname, { access: "private" });
+  });
+
+  it("skips an existing content-addressed Blob with matching immutable metadata on repeat import", async () => {
+    const fixture = createFixture({ attachment: true });
+    const pkg = exportMigrationPackage({
+      databasePath: fixture.databasePath,
+      outputPath: path.join(fixture.directory, "package.json"),
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    });
+    const database = new MemoryCloudDatabase();
+    const blobs = new Map<string, { size: number; contentType: string }>();
+    const upload = vi.fn(async (pathname: string, content: Buffer, options: { contentType: string }) => {
+      if (blobs.has(pathname)) throw new Error("overwrite attempted");
+      blobs.set(pathname, { size: content.byteLength, contentType: options.contentType });
+    });
+    const uploader: MigrationUploader = {
+      upload,
+      inspect: vi.fn(async (pathname) => blobs.get(pathname) ?? null),
+      delete: vi.fn(async (pathname) => { blobs.delete(pathname); }),
+    };
+
+    await importCloudData({ pkg, database, uploader, attachmentsDirectory: fixture.attachmentsDirectory });
+    await importCloudData({ pkg, database, uploader, attachmentsDirectory: fixture.attachmentsDirectory });
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(blobs.get(pkg.attachments[0].pathname)).toEqual({ size: pkg.attachments[0].size, contentType: "application/pdf" });
+    expect(database.entities.get("books:book-with-pdf")!.payload.pdf_file_id).toBe(pkg.attachments[0].pathname);
   });
 
   it("covers the sorted attachment manifest with the canonical package checksum", async () => {
@@ -334,14 +386,45 @@ describe("SQLite to cloud migration package", () => {
       attachmentsDirectory: fixture.attachmentsDirectory,
     })).rejects.toThrow("transaction failed");
     expect(database.entities.size).toBe(0);
-    expect(database.blobCleanup.get("reading/books/book-with-pdf/fixture.pdf")).toMatchObject({
+    expect(database.blobCleanup.get(pkg.attachments[0].pathname)).toMatchObject({
       reason: "migration-rollback",
       state: "pending",
     });
   });
+
+  it("continues rollback cleanup after both outbox and delete fail for an earlier Blob", async () => {
+    const fixture = createFixture({ attachment: true, cover: true });
+    const pkg = exportMigrationPackage({
+      databasePath: fixture.databasePath,
+      outputPath: path.join(fixture.directory, "package.json"),
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    });
+    const database = new MemoryCloudDatabase();
+    database.failTransaction = true;
+    database.failCleanupPaths.add(pkg.attachments[0].pathname);
+    const deleteBlob = vi.fn(async (pathname: string) => {
+      if (pathname === pkg.attachments[0].pathname) throw new Error("delete failed");
+    });
+    const uploader: MigrationUploader = {
+      upload: vi.fn(async () => undefined),
+      inspect: vi.fn(async () => null),
+      delete: deleteBlob,
+    };
+
+    await expect(importCloudData({
+      pkg,
+      database,
+      uploader,
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    })).rejects.toThrow("人工处理");
+
+    expect(database.cleanupAttempts).toEqual(pkg.attachments.map((attachment) => attachment.pathname));
+    expect(database.blobCleanup.get(pkg.attachments[1].pathname)).toMatchObject({ reason: "migration-rollback", state: "pending" });
+    expect(deleteBlob).toHaveBeenCalledWith(pkg.attachments[0].pathname);
+  });
 });
 
-function createFixture(options: { attachment?: boolean } = {}) {
+function createFixture(options: { attachment?: boolean; cover?: boolean } = {}) {
   const directory = makeTestDirectory("cloud-migration");
   directories.push(directory);
   const paths = getAppPaths(directory);
@@ -372,6 +455,10 @@ function createFixture(options: { attachment?: boolean } = {}) {
         "2026-08-16T06:00:00.000Z", "2026-08-16T06:00:00.000Z", null,
       );
       fs.writeFileSync(path.join(paths.readingFilesDir, "fixture.pdf"), "%PDF-1.7\nfixture\n%%EOF");
+      if (options.cover) {
+        db.prepare("UPDATE books SET cover_file_id = ?, cover_filename = ? WHERE id = ?").run("fixture.png", "fixture.png", "book-with-pdf");
+        fs.writeFileSync(path.join(paths.readingFilesDir, "fixture.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]));
+      }
     }
     manager.checkpoint();
   } finally {
@@ -408,7 +495,7 @@ function fileHash(filePath: string): string {
 function migrationUploader(upload = vi.fn(async () => undefined)): MigrationUploader {
   return {
     upload,
-    exists: vi.fn(async () => false),
+    inspect: vi.fn(async () => null),
     delete: vi.fn(async () => undefined),
   } as MigrationUploader;
 }
@@ -427,6 +514,8 @@ class MemoryCloudDatabase implements MigrationCloudDatabase, Queryable {
   settings = new Map<string, { value: unknown; updated_at: string }>();
   dailyReviews = new Map<string, { payload: Record<string, unknown>; created_at: string; updated_at: string }>();
   blobCleanup = new Map<string, { reason: string; state: string }>();
+  cleanupAttempts: string[] = [];
+  failCleanupPaths = new Set<string>();
   transactionCalls = 0;
   failTransaction = false;
   queryCalls: Array<{ text: string; values: unknown[] }> = [];
@@ -469,6 +558,8 @@ class MemoryCloudDatabase implements MigrationCloudDatabase, Queryable {
     }
     if (text.includes("INSERT INTO workspace_blob_cleanup")) {
       const [pathname, reason] = values as [string, string];
+      this.cleanupAttempts.push(pathname);
+      if (this.failCleanupPaths.has(pathname)) throw new Error("outbox failed");
       this.blobCleanup.set(pathname, { reason, state: "pending" });
       return { rows: [] };
     }
