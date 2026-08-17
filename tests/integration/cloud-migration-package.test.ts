@@ -221,7 +221,7 @@ describe("SQLite to cloud migration package", () => {
     expect(blob.get).toHaveBeenCalledWith(expectedPathname, { access: "private" });
   });
 
-  it("skips an existing content-addressed Blob with matching immutable metadata on repeat import", async () => {
+  it("skips an existing content-addressed Blob only when its streamed checksum also matches", async () => {
     const fixture = createFixture({ attachment: true });
     const pkg = exportMigrationPackage({
       databasePath: fixture.databasePath,
@@ -229,10 +229,14 @@ describe("SQLite to cloud migration package", () => {
       attachmentsDirectory: fixture.attachmentsDirectory,
     });
     const database = new MemoryCloudDatabase();
-    const blobs = new Map<string, { size: number; contentType: string }>();
+    const blobs = new Map<string, { size: number; contentType: string; sha256: string }>();
     const upload = vi.fn(async (pathname: string, content: Buffer, options: { contentType: string }) => {
       if (blobs.has(pathname)) throw new Error("overwrite attempted");
-      blobs.set(pathname, { size: content.byteLength, contentType: options.contentType });
+      blobs.set(pathname, {
+        size: content.byteLength,
+        contentType: options.contentType,
+        sha256: createHash("sha256").update(content).digest("hex"),
+      });
     });
     const uploader: MigrationUploader = {
       upload,
@@ -244,8 +248,41 @@ describe("SQLite to cloud migration package", () => {
     await importCloudData({ pkg, database, uploader, attachmentsDirectory: fixture.attachmentsDirectory });
 
     expect(upload).toHaveBeenCalledTimes(1);
-    expect(blobs.get(pkg.attachments[0].pathname)).toEqual({ size: pkg.attachments[0].size, contentType: "application/pdf" });
+    expect(blobs.get(pkg.attachments[0].pathname)).toEqual({
+      size: pkg.attachments[0].size,
+      contentType: "application/pdf",
+      sha256: pkg.attachments[0].sha256,
+    });
     expect(database.entities.get("books:book-with-pdf")!.payload.pdf_file_id).toBe(pkg.attachments[0].pathname);
+  });
+
+  it("rejects an existing content-addressed Blob with the same size and type but different bytes", async () => {
+    const fixture = createFixture({ attachment: true });
+    const pkg = exportMigrationPackage({
+      databasePath: fixture.databasePath,
+      outputPath: path.join(fixture.directory, "package.json"),
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    });
+    const database = new MemoryCloudDatabase();
+    const upload = vi.fn(async () => undefined);
+    const uploader: MigrationUploader = {
+      upload,
+      inspect: vi.fn(async () => ({
+        size: pkg.attachments[0].size,
+        contentType: pkg.attachments[0].contentType,
+        sha256: "0".repeat(64),
+      })),
+      delete: vi.fn(async () => undefined),
+    };
+
+    await expect(importCloudData({
+      pkg,
+      database,
+      uploader,
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    })).rejects.toThrow("不一致");
+    expect(upload).not.toHaveBeenCalled();
+    expect(database.transactionCalls).toBe(0);
   });
 
   it("covers the sorted attachment manifest with the canonical package checksum", async () => {
@@ -421,6 +458,68 @@ describe("SQLite to cloud migration package", () => {
     expect(database.cleanupAttempts).toEqual(pkg.attachments.map((attachment) => attachment.pathname));
     expect(database.blobCleanup.get(pkg.attachments[1].pathname)).toMatchObject({ reason: "migration-rollback", state: "pending" });
     expect(deleteBlob).toHaveBeenCalledWith(pkg.attachments[0].pathname);
+  });
+
+  it("tracks an earlier upload when inspecting the next attachment fails", async () => {
+    const fixture = createFixture({ attachment: true, cover: true });
+    const pkg = exportMigrationPackage({
+      databasePath: fixture.databasePath,
+      outputPath: path.join(fixture.directory, "package.json"),
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    });
+    const database = new MemoryCloudDatabase();
+    let inspectCalls = 0;
+    const uploader: MigrationUploader = {
+      upload: vi.fn(async () => undefined),
+      inspect: vi.fn(async () => {
+        inspectCalls += 1;
+        if (inspectCalls === 2) throw new Error("inspect failed");
+        return null;
+      }),
+      delete: vi.fn(async () => undefined),
+    };
+
+    await expect(importCloudData({
+      pkg,
+      database,
+      uploader,
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    })).rejects.toThrow("inspect failed");
+
+    expect(database.cleanupAttempts).toEqual([pkg.attachments[0].pathname]);
+  });
+
+  it("tracks an earlier upload when recovery inspection for a later failed upload also fails", async () => {
+    const fixture = createFixture({ attachment: true, cover: true });
+    const pkg = exportMigrationPackage({
+      databasePath: fixture.databasePath,
+      outputPath: path.join(fixture.directory, "package.json"),
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    });
+    const database = new MemoryCloudDatabase();
+    let inspectCalls = 0;
+    let uploadCalls = 0;
+    const uploader: MigrationUploader = {
+      upload: vi.fn(async () => {
+        uploadCalls += 1;
+        if (uploadCalls === 2) throw new Error("upload failed");
+      }),
+      inspect: vi.fn(async () => {
+        inspectCalls += 1;
+        if (inspectCalls === 3) throw new Error("recovery inspect failed");
+        return null;
+      }),
+      delete: vi.fn(async () => undefined),
+    };
+
+    await expect(importCloudData({
+      pkg,
+      database,
+      uploader,
+      attachmentsDirectory: fixture.attachmentsDirectory,
+    })).rejects.toThrow("recovery inspect failed");
+
+    expect(database.cleanupAttempts).toEqual([pkg.attachments[0].pathname]);
   });
 });
 

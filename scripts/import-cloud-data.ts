@@ -1,6 +1,7 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { BlobNotFoundError, del, head, put } from "@vercel/blob";
+import { BlobNotFoundError, del, get, put } from "@vercel/blob";
 import { collectionDefinitions, type CollectionName } from "../server/collections.js";
 import { readCloudConfig } from "../server/cloud/config.js";
 import { CloudDatabase, type Queryable } from "../server/cloud/database.js";
@@ -26,7 +27,7 @@ type PrivateUploadOptions = {
 
 export type MigrationUploader = {
   upload(pathname: string, content: Buffer, options: PrivateUploadOptions): Promise<void>;
-  inspect(pathname: string): Promise<{ size: number; contentType: string } | null>;
+  inspect(pathname: string, maximumBytes: number): Promise<{ size: number; contentType: string; sha256: string } | null>;
   delete(pathname: string): Promise<void>;
 };
 
@@ -51,10 +52,17 @@ const defaultUploader: MigrationUploader = {
   upload: async (pathname, content, options) => {
     await put(pathname, content, options);
   },
-  inspect: async (pathname) => {
+  inspect: async (pathname, maximumBytes) => {
     try {
-      const blob = await head(pathname);
-      return { size: blob.size, contentType: blob.contentType };
+      const result = await get(pathname, { access: "private", useCache: false });
+      if (!result) return null;
+      if (result.statusCode !== 200 || !result.stream) throw new Error(`无法读取已有 Blob：${pathname}`);
+      if (result.blob.size > maximumBytes) throw new Error(`已有 Blob 超过迁移附件大小上限：${pathname}`);
+      return {
+        size: result.blob.size,
+        contentType: result.blob.contentType,
+        sha256: await hashPrivateBlobStream(result.stream, result.blob.size, maximumBytes),
+      };
     } catch (error) {
       if (error instanceof BlobNotFoundError) return null;
       throw error;
@@ -148,38 +156,81 @@ async function uploadAttachments(
     return { attachment, content };
   });
   const newlyUploaded: string[] = [];
-  for (const { attachment, content } of prepared) {
-    const existing = await uploader.inspect(attachment.pathname);
-    if (existing) {
-      assertMatchingBlobMetadata(attachment, existing);
-      continue;
-    }
-    try {
-      await uploader.upload(attachment.pathname, content, {
-        access: "private",
-        addRandomSuffix: false,
-        allowOverwrite: false,
-        contentType: attachment.contentType,
-      });
-      newlyUploaded.push(attachment.pathname);
-    } catch (error) {
-      const raced = await uploader.inspect(attachment.pathname);
-      if (raced) {
-        assertMatchingBlobMetadata(attachment, raced);
+  try {
+    for (const { attachment, content } of prepared) {
+      const existing = await uploader.inspect(attachment.pathname, attachment.size);
+      if (existing) {
+        assertMatchingBlobMetadata(attachment, existing);
         continue;
       }
-      throw Object.assign(error instanceof Error ? error : new Error("附件上传失败"), { newlyUploaded });
+      try {
+        await uploader.upload(attachment.pathname, content, {
+          access: "private",
+          addRandomSuffix: false,
+          allowOverwrite: false,
+          contentType: attachment.contentType,
+        });
+        newlyUploaded.push(attachment.pathname);
+      } catch (error) {
+        const raced = await uploader.inspect(attachment.pathname, attachment.size);
+        if (raced) {
+          assertMatchingBlobMetadata(attachment, raced);
+          continue;
+        }
+        throw error;
+      }
     }
+  } catch (error) {
+    throw attachConfirmedUploads(error, newlyUploaded);
   }
   return newlyUploaded;
 }
 
 function assertMatchingBlobMetadata(
   attachment: MigrationAttachment,
-  metadata: { size: number; contentType: string },
+  metadata: { size: number; contentType: string; sha256: string },
 ): void {
-  if (metadata.size !== attachment.size || metadata.contentType !== attachment.contentType) {
+  if (metadata.size !== attachment.size || metadata.contentType !== attachment.contentType || metadata.sha256 !== attachment.sha256) {
     throw new Error(`已存在的 Blob 与迁移附件不一致：${attachment.pathname}`);
+  }
+}
+
+async function hashPrivateBlobStream(
+  stream: ReadableStream<Uint8Array>,
+  declaredSize: number,
+  maximumBytes: number,
+): Promise<string> {
+  const reader = stream.getReader();
+  const hash = createHash("sha256");
+  let bytesRead = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesRead += value.byteLength;
+      if (bytesRead > maximumBytes || bytesRead > declaredSize) {
+        await reader.cancel("Blob exceeded declared migration attachment size");
+        throw new Error("已有 Blob 内容超过迁移附件大小上限");
+      }
+      hash.update(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (bytesRead !== declaredSize) throw new Error("已有 Blob 声明大小与实际内容不一致");
+  return hash.digest("hex");
+}
+
+function attachConfirmedUploads(error: unknown, newlyUploaded: string[]): Error & { newlyUploaded: string[] } {
+  const failure = error instanceof Error ? error : new Error("附件上传失败");
+  const previouslyAttached = Array.isArray((failure as Error & { newlyUploaded?: unknown }).newlyUploaded)
+    ? (failure as Error & { newlyUploaded: string[] }).newlyUploaded
+    : [];
+  const confirmed = [...new Set([...previouslyAttached, ...newlyUploaded])];
+  try {
+    return Object.assign(failure, { newlyUploaded: confirmed });
+  } catch {
+    return Object.assign(new Error(failure.message, { cause: failure }), { newlyUploaded: confirmed });
   }
 }
 
