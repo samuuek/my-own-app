@@ -7,9 +7,9 @@ import type { Entity } from "../../server/store.js";
 type CleanupState = "pending" | "claimed" | "deleted";
 type Cleanup = { pathname: string; reason: string; attempts: number; last_error: string | null; state: CleanupState };
 
-function deferred<T = void>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
 }
 
@@ -34,12 +34,17 @@ function pdfStream(): ReadableStream<Uint8Array> {
   });
 }
 
-function setup() {
-  let book: Entity | null = { id: "book-1", title: "Serialized book", deleted_at: null };
+function setup(
+  initialBook: Entity = { id: "book-1", title: "Serialized book", deleted_at: null },
+  enforceBookFirst = false,
+) {
+  let book: Entity | null = { ...initialBook };
   const cleanup = new Map<string, Cleanup>();
   const mutex = new PathMutex();
+  const bookMutex = new PathMutex();
   const lockCalls: string[] = [];
   let throwAfterCommit = false;
+  let nextBookReadPause: { acquired: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> } | null = null;
   const store: any = {
     get: vi.fn(async () => {
       if (!book) throw new NotFoundError("missing book");
@@ -80,9 +85,24 @@ function setup() {
   };
   store.transaction = vi.fn(async (work: (tx: any) => Promise<any>) => {
     const releases: Array<() => void> = [];
+    let bookLocked = false;
     const tx = {
       ...store,
+      getForUpdate: vi.fn(async (...args: [string, string, boolean?]) => {
+        if (!bookLocked) {
+          releases.push(await bookMutex.acquire(`book:${args[1]}`));
+          bookLocked = true;
+          if (nextBookReadPause) {
+            const pause = nextBookReadPause;
+            nextBookReadPause = null;
+            pause.acquired.resolve();
+            await pause.release.promise;
+          }
+        }
+        return store.getForUpdate(...args);
+      }),
       lockBlobPath: vi.fn(async (pathname: string) => {
+        if (enforceBookFirst && !bookLocked) throw new Error("path lock acquired before book row lock");
         lockCalls.push(pathname);
         releases.push(await mutex.acquire(pathname));
       }),
@@ -106,6 +126,11 @@ function setup() {
     manager: new CloudReadingFileManager(store, blob), store, blob, cleanup, lockCalls,
     book: () => book as Entity,
     makeCommitAmbiguous: () => { throwAfterCommit = true; },
+    pauseNextBookRead: () => {
+      const pause = { acquired: deferred(), release: deferred() };
+      nextBookReadPause = pause;
+      return pause;
+    },
   };
 }
 
@@ -172,5 +197,36 @@ describe("serialized Blob completion and cleanup", () => {
     expect(book().pdf_file_id).toBe(pathname);
     expect(store.update).toHaveBeenCalledTimes(1);
     expect(blob.del).not.toHaveBeenCalledWith(pathname);
+  });
+
+  it("serializes a duplicate callback and PDF removal in book-then-path order", async () => {
+    const { manager, book, pauseNextBookRead } = setup({
+      id: "book-1", title: "Serialized book", deleted_at: null,
+      pdf_file_id: pathname, pdf_filename: "book.pdf",
+    }, true);
+    const pause = pauseNextBookRead();
+    const completionResult = manager.completeUpload(completion).then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    const acquiredBookFirst = await Promise.race([
+      pause.acquired.promise.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100)),
+    ]);
+    expect(acquiredBookFirst).toBe(true);
+
+    const removal = manager.removePdf("book-1");
+    pause.release.resolve();
+    const [completedResult, removed] = await Promise.all([completionResult, removal]);
+    expect(completedResult.status).toBe("fulfilled");
+    expect(removed.pdf_file_id).toBeNull();
+    expect(book().pdf_file_id).toBeNull();
+  });
+
+  it("claims cleanup in book-then-path order", async () => {
+    const { manager, store, cleanup } = setup(undefined, true);
+    await store.enqueueBlobCleanup(pathname, "upload-metadata-failed");
+    await manager.retryPendingCleanup();
+    expect(cleanup.get(pathname)?.state).toBe("deleted");
   });
 });

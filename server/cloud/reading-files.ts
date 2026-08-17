@@ -99,19 +99,20 @@ export class CloudReadingFileManager {
     }
     try {
       await this.store.transaction(async (store) => {
-        await store.lockBlobPath(uploadedPath);
+        const book = await store.getForUpdate("books", payload.bookId);
+        const field = payload.kind === "pdf" ? "pdf_file_id" : "cover_file_id";
+        const filenameField = payload.kind === "pdf" ? "pdf_filename" : "cover_filename";
+        const oldPath = book[field];
+        const safeOldPath = typeof oldPath === "string" ? this.bookPath(payload.bookId, oldPath) : null;
+        await this.lockBlobPaths(store, [uploadedPath, safeOldPath]);
         const cleanup = await store.getBlobCleanupForUpdate(uploadedPath);
         if (cleanup?.state === "claimed" || cleanup?.state === "deleted") {
           throw new ReadingValidationError("上传文件已失效，请重新上传");
         }
         if (cleanup?.state === "pending") await store.cancelBlobCleanup(uploadedPath);
-        const book = await store.getForUpdate("books", payload.bookId);
-        const field = payload.kind === "pdf" ? "pdf_file_id" : "cover_file_id";
-        const filenameField = payload.kind === "pdf" ? "pdf_filename" : "cover_filename";
-        const oldPath = book[field];
         if (oldPath === uploadedPath) return;
-        if (typeof oldPath === "string" && oldPath !== uploadedPath) {
-          await store.enqueueBlobCleanup(oldPath, payload.kind === "pdf" ? "replace-pdf" : "replace-cover");
+        if (safeOldPath && safeOldPath !== uploadedPath) {
+          await store.enqueueBlobCleanup(safeOldPath, payload.kind === "pdf" ? "replace-pdf" : "replace-cover");
         }
         await store.update("books", payload.bookId, {
           [field]: uploadedPath,
@@ -137,7 +138,11 @@ export class CloudReadingFileManager {
   async removePdf(bookId: string): Promise<Entity> {
     const updated = await this.store.transaction(async (store) => {
       const book = await store.getForUpdate("books", bookId);
-      if (typeof book.pdf_file_id === "string") await store.enqueueBlobCleanup(book.pdf_file_id, "remove-pdf");
+      if (typeof book.pdf_file_id === "string") {
+        const pathname = this.bookPath(bookId, book.pdf_file_id);
+        await this.lockBlobPaths(store, [pathname]);
+        await store.enqueueBlobCleanup(pathname, "remove-pdf");
+      }
       return store.update("books", bookId, { pdf_file_id: null, pdf_filename: null });
     });
     await this.retryPendingCleanup();
@@ -156,7 +161,11 @@ export class CloudReadingFileManager {
   async removeCover(bookId: string): Promise<Entity> {
     const updated = await this.store.transaction(async (store) => {
       const book = await store.getForUpdate("books", bookId);
-      if (typeof book.cover_file_id === "string") await store.enqueueBlobCleanup(book.cover_file_id, "remove-cover");
+      if (typeof book.cover_file_id === "string") {
+        const pathname = this.bookPath(bookId, book.cover_file_id);
+        await this.lockBlobPaths(store, [pathname]);
+        await store.enqueueBlobCleanup(pathname, "remove-cover");
+      }
       return store.update("books", bookId, { cover_file_id: null, cover_filename: null });
     });
     await this.retryPendingCleanup();
@@ -167,10 +176,14 @@ export class CloudReadingFileManager {
     await this.store.transaction(async (store) => {
       const book = await store.getForUpdate("books", bookId, true);
       if (!book.deleted_at) throw new ReadingValidationError("请先将书籍移入回收站，再永久删除");
+      const attachments = [
+        typeof book.pdf_file_id === "string" ? { pathname: this.bookPath(bookId, book.pdf_file_id), reason: "delete-book-pdf" } : null,
+        typeof book.cover_file_id === "string" ? { pathname: this.bookPath(bookId, book.cover_file_id), reason: "delete-book-cover" } : null,
+      ].filter((value): value is { pathname: string; reason: string } => value !== null);
+      await this.lockBlobPaths(store, attachments.map((attachment) => attachment.pathname));
       const deleted = await store.permanentDelete("books", bookId);
       if (!deleted) throw new NotFoundError("没有找到可永久删除的书籍");
-      if (typeof book.pdf_file_id === "string") await store.enqueueBlobCleanup(book.pdf_file_id, "delete-book-pdf");
-      if (typeof book.cover_file_id === "string") await store.enqueueBlobCleanup(book.cover_file_id, "delete-book-cover");
+      for (const attachment of attachments) await store.enqueueBlobCleanup(attachment.pathname, attachment.reason);
     });
     await this.retryPendingCleanup();
   }
@@ -183,10 +196,11 @@ export class CloudReadingFileManager {
       let claimed: boolean;
       try {
         claimed = await this.store.transaction(async (store) => {
+          const book = await this.getBookForCleanup(store, bookId);
           await store.lockBlobPath(pathname);
           const cleanup = await store.getBlobCleanupForUpdate(pathname);
           if (!cleanup || cleanup.state === "deleted") return false;
-          if (await this.isCurrentAttachment(store, bookId, pathname)) {
+          if (book?.pdf_file_id === pathname || book?.cover_file_id === pathname) {
             await store.cancelBlobCleanup(pathname);
             return false;
           }
@@ -194,22 +208,20 @@ export class CloudReadingFileManager {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Blob cleanup claim failed";
-        await this.store.failBlobCleanup(pathname, message.slice(0, 500));
+        await this.recordCleanupFailure(bookId, pathname, message);
         continue;
       }
       if (!claimed) continue;
       try {
         await this.blob.del(pathname);
         await this.store.transaction(async (store) => {
+          await this.getBookForCleanup(store, bookId);
           await store.lockBlobPath(pathname);
           await store.completeBlobCleanup(pathname);
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Blob cleanup failed";
-        await this.store.transaction(async (store) => {
-          await store.lockBlobPath(pathname);
-          await store.failBlobCleanup(pathname, message.slice(0, 500));
-        });
+        await this.recordCleanupFailure(bookId, pathname, message);
       }
     }
   }
@@ -247,14 +259,26 @@ export class CloudReadingFileManager {
     await this.retryPendingCleanup();
   }
 
-  private async isCurrentAttachment(store: ReadingFileStore, bookId: string, pathname: string): Promise<boolean> {
+  private async getBookForCleanup(store: ReadingFileStore, bookId: string): Promise<Entity | null> {
     try {
-      const book = await store.get("books", bookId, true);
-      return book.pdf_file_id === pathname || book.cover_file_id === pathname;
+      return await store.getForUpdate("books", bookId, true);
     } catch (error) {
-      if (error instanceof NotFoundError) return false;
+      if (error instanceof NotFoundError) return null;
       throw error;
     }
+  }
+
+  private async lockBlobPaths(store: ReadingFileStore, pathnames: Array<string | null>): Promise<void> {
+    const sorted = [...new Set(pathnames.filter((value): value is string => Boolean(value)))].sort();
+    for (const pathname of sorted) await store.lockBlobPath(pathname);
+  }
+
+  private async recordCleanupFailure(bookId: string, pathname: string, message: string): Promise<void> {
+    await this.store.transaction(async (store) => {
+      await this.getBookForCleanup(store, bookId);
+      await store.lockBlobPath(pathname);
+      await store.failBlobCleanup(pathname, message.slice(0, 500));
+    });
   }
 
   private completedPath(payload: UploadPayload, pathname: string, contentType: string): string {
