@@ -153,16 +153,16 @@ export function EntityForm({
           <label className={classNames("form-field", field.type === "textarea" && "form-field-wide")} key={field.name}>
             <span>{field.label}{field.required ? <em>必填</em> : null}</span>
             {field.type === "textarea" ? (
-              <textarea rows={4} aria-invalid={invalid} placeholder={field.placeholder} {...register(field.name, { required: field.required ? "请填写此项" : false })} />
+              <textarea rows={4} aria-label={field.label} aria-invalid={invalid} placeholder={field.placeholder} {...register(field.name, { required: field.required ? "请填写此项" : false })} />
             ) : field.type === "select" ? (
-              <select aria-invalid={invalid} {...register(field.name, { required: field.required ? "请选择此项" : false })}>
+              <select aria-label={field.label} aria-invalid={invalid} {...register(field.name, { required: field.required ? "请选择此项" : false })}>
                 <option value="">请选择</option>
                 {field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             ) : field.type === "checkbox" ? (
-              <input type="checkbox" {...register(field.name)} />
+              <input aria-label={field.label} type="checkbox" {...register(field.name)} />
             ) : (
-              <input type={field.type ?? "text"} step={field.step} aria-invalid={invalid} placeholder={field.placeholder} {...register(field.name, { required: field.required ? "请填写此项" : false })} />
+              <input aria-label={field.label} type={field.type ?? "text"} step={field.step} aria-invalid={invalid} placeholder={field.placeholder} {...register(field.name, { required: field.required ? "请填写此项" : false })} />
             )}
             {field.helper ? <small>{field.helper}</small> : null}
             {invalid ? <small className="field-error"><WarningCircle size={12} weight="fill" aria-hidden />{String(errors[field.name]?.message)}</small> : null}

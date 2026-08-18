@@ -8,6 +8,61 @@ async function create(request: APIRequestContext, collection: string, payload: R
   return (await response.json()).data;
 }
 
+test("renders the progress workbench in desktop and narrow iPhone layouts", async ({ page, request }) => {
+  try {
+    expect((await request.put("/api/settings", { data: { appearance: "ios", theme: "light", progressWorkbenchOnboarding: "skipped" } })).ok()).toBeTruthy();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", "ios");
+    for (const heading of ["今日进度", "重要日期", "长期目标", "专注计时"]) {
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    }
+    const desktop = await page.locator(".workbench-pair").evaluate((pair) => {
+      const cards = Array.from(pair.children).map((child) => child.getBoundingClientRect());
+      return { display: getComputedStyle(pair).display, topDelta: Math.abs(cards[0].top - cards[1].top), leftDelta: Math.abs(cards[0].left - cards[1].left) };
+    });
+    expect(desktop.display).toBe("grid");
+    expect(desktop.topDelta).toBeLessThanOrEqual(1);
+    expect(desktop.leftDelta).toBeGreaterThan(100);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    const narrow = await page.evaluate(() => {
+      const pair = document.querySelector(".workbench-pair")!;
+      const cards = Array.from(pair.children).map((child) => child.getBoundingClientRect());
+      return {
+        viewportWidth: document.documentElement.clientWidth,
+        pageWidth: document.documentElement.scrollWidth,
+        topDelta: cards[1].top - cards[0].bottom,
+        widthDelta: Math.abs(cards[0].width - cards[1].width),
+      };
+    });
+    expect(narrow.pageWidth).toBeLessThanOrEqual(narrow.viewportWidth);
+    expect(narrow.topDelta).toBeGreaterThanOrEqual(12);
+    expect(narrow.widthDelta).toBeLessThanOrEqual(1);
+  } finally {
+    await request.put("/api/settings", { data: { appearance: "liquid", theme: "light", progressWorkbenchOnboarding: "skipped" } });
+  }
+});
+
+test("keeps the progress workbench operable in all four appearances", async ({ page, request }) => {
+  try {
+    for (const appearance of ["ios", "liquid", "notebook", "neo"] as const) {
+      expect((await request.put("/api/settings", { data: { appearance, theme: "light", progressWorkbenchOnboarding: "skipped" } })).ok()).toBeTruthy();
+      await page.goto("/");
+      await expect(page.locator("html")).toHaveAttribute("data-appearance", appearance);
+      await expect(page.getByRole("button", { name: "添加重要日期" })).toBeVisible();
+      await page.getByRole("button", { name: "添加重要日期" }).click();
+      await expect(page.getByRole("dialog", { name: "添加重要日期" })).toBeVisible();
+      await page.getByRole("button", { name: "关闭" }).click();
+      const layout = await page.evaluate(() => ({ viewportWidth: document.documentElement.clientWidth, pageWidth: document.documentElement.scrollWidth }));
+      expect(layout.pageWidth).toBeLessThanOrEqual(layout.viewportWidth);
+    }
+  } finally {
+    await request.put("/api/settings", { data: { appearance: "liquid", theme: "light", progressWorkbenchOnboarding: "skipped" } });
+  }
+});
+
 test("opens locally, uses no external runtime resources, and reaches all nine pages", async ({ page }) => {
   const externalRequests: string[] = [];
   page.on("request", (request) => {

@@ -1,0 +1,326 @@
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import { BlobNotFoundError, del, get, put } from "@vercel/blob";
+import { collectionDefinitions, type CollectionName } from "../server/collections.js";
+import { readCloudConfig } from "../server/cloud/config.js";
+import { CloudDatabase, type Queryable } from "../server/cloud/database.js";
+import {
+  readMigrationPackage,
+  readValidatedAttachment,
+  validateMigrationPackage,
+  type MigrationAttachment,
+  type MigrationCount,
+  type MigrationPackage,
+} from "./export-cloud-data.js";
+
+export type MigrationCloudDatabase = Queryable & {
+  transaction<T>(work: (queryable: Queryable) => Promise<T>): Promise<T>;
+};
+
+type PrivateUploadOptions = {
+  access: "private";
+  addRandomSuffix: false;
+  allowOverwrite: false;
+  contentType: string;
+};
+
+export type MigrationUploader = {
+  upload(pathname: string, content: Buffer, options: PrivateUploadOptions): Promise<void>;
+  inspect(pathname: string, maximumBytes: number): Promise<{ size: number; contentType: string; sha256: string } | null>;
+  delete(pathname: string): Promise<void>;
+};
+
+export type ImportCloudDataOptions = {
+  pkg: MigrationPackage;
+  database: MigrationCloudDatabase;
+  uploader?: MigrationUploader;
+  attachmentsDirectory?: string;
+  dryRun?: boolean;
+};
+
+export type ImportCloudDataResult = {
+  dryRun: boolean;
+  counts: Record<CollectionName, MigrationCount>;
+  settings: number;
+  dailyReviews: number;
+  attachments: number;
+};
+
+const collectionNames = Object.keys(collectionDefinitions) as CollectionName[];
+const defaultUploader: MigrationUploader = {
+  upload: async (pathname, content, options) => {
+    await put(pathname, content, options);
+  },
+  inspect: async (pathname, maximumBytes) => {
+    try {
+      const result = await get(pathname, { access: "private", useCache: false });
+      if (!result) return null;
+      if (result.statusCode !== 200 || !result.stream) throw new Error(`无法读取已有 Blob：${pathname}`);
+      if (result.blob.size > maximumBytes) throw new Error(`已有 Blob 超过迁移附件大小上限：${pathname}`);
+      return {
+        size: result.blob.size,
+        contentType: result.blob.contentType,
+        sha256: await hashPrivateBlobStream(result.stream, result.blob.size, maximumBytes),
+      };
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) return null;
+      throw error;
+    }
+  },
+  delete: async (pathname) => {
+    await del(pathname);
+  },
+};
+
+export async function importCloudData(options: ImportCloudDataOptions): Promise<ImportCloudDataResult> {
+  const pkg = validateMigrationPackage(options.pkg);
+  const result: ImportCloudDataResult = {
+    dryRun: options.dryRun === true,
+    counts: pkg.counts,
+    settings: Object.keys(pkg.settings).length,
+    dailyReviews: pkg.dailyReviews.length,
+    attachments: pkg.attachments.length,
+  };
+  if (options.dryRun) return result;
+
+  const uploader = options.uploader ?? defaultUploader;
+  const newlyUploaded: string[] = [];
+  try {
+    if (pkg.attachments.length > 0) {
+      if (!options.attachmentsDirectory) throw new Error("迁移包包含附件；必须显式指定附件目录");
+      newlyUploaded.push(...await uploadAttachments(pkg.attachments, options.attachmentsDirectory, uploader));
+    }
+
+    await options.database.transaction(async (transaction) => {
+    for (const name of collectionNames) {
+      for (const entity of pkg.collections[name]) {
+        await transaction.query(`
+          INSERT INTO workspace_entities(collection, id, payload, created_at, updated_at, deleted_at)
+          VALUES ($1, $2, $3::jsonb, $4::timestamptz, $5::timestamptz, $6::timestamptz)
+          ON CONFLICT(collection, id) DO UPDATE SET
+            payload = EXCLUDED.payload,
+            created_at = EXCLUDED.created_at,
+            updated_at = EXCLUDED.updated_at,
+            deleted_at = EXCLUDED.deleted_at
+        `, [name, entity.id, JSON.stringify(entity), entity.created_at, entity.updated_at, entity.deleted_at]);
+      }
+    }
+
+    for (const key of Object.keys(pkg.settings).sort()) {
+      await transaction.query(`
+        INSERT INTO workspace_settings(key, value, updated_at)
+        VALUES ($1, $2::jsonb, $3::timestamptz)
+        ON CONFLICT(key) DO UPDATE SET
+          value = EXCLUDED.value,
+          updated_at = EXCLUDED.updated_at
+      `, [key, JSON.stringify(pkg.settings[key] ?? null), pkg.settingUpdatedAt[key]]);
+    }
+
+    for (const review of pkg.dailyReviews) {
+      await transaction.query(`
+        INSERT INTO workspace_daily_reviews(review_date, payload, created_at, updated_at)
+        VALUES ($1::date, $2::jsonb, $3::timestamptz, $4::timestamptz)
+        ON CONFLICT(review_date) DO UPDATE SET
+          payload = EXCLUDED.payload,
+          created_at = EXCLUDED.created_at,
+          updated_at = EXCLUDED.updated_at
+      `, [review.review_date, JSON.stringify(review), review.created_at, review.updated_at]);
+    }
+    });
+  } catch (error) {
+    const partialUploads = error instanceof Error && Array.isArray((error as Error & { newlyUploaded?: unknown }).newlyUploaded)
+      ? (error as Error & { newlyUploaded: string[] }).newlyUploaded
+      : [];
+    const cleanupPaths = [...new Set([...newlyUploaded, ...partialUploads])];
+    if (cleanupPaths.length > 0) await preserveCleanupIntent(options.database, uploader, cleanupPaths);
+    throw error;
+  }
+  return result;
+}
+
+async function uploadAttachments(
+  attachments: MigrationAttachment[],
+  attachmentsDirectory: string,
+  uploader: MigrationUploader,
+): Promise<string[]> {
+  const prepared = attachments.map((attachment) => {
+    const { content } = readValidatedAttachment({
+      attachmentsDirectory,
+      fileId: attachment.fileId,
+      kind: attachment.kind,
+      contentType: attachment.contentType,
+      expectedSize: attachment.size,
+      expectedSha256: attachment.sha256,
+    });
+    return { attachment, content };
+  });
+  const newlyUploaded: string[] = [];
+  try {
+    for (const { attachment, content } of prepared) {
+      const existing = await uploader.inspect(attachment.pathname, attachment.size);
+      if (existing) {
+        assertMatchingBlobMetadata(attachment, existing);
+        continue;
+      }
+      try {
+        await uploader.upload(attachment.pathname, content, {
+          access: "private",
+          addRandomSuffix: false,
+          allowOverwrite: false,
+          contentType: attachment.contentType,
+        });
+        newlyUploaded.push(attachment.pathname);
+      } catch (error) {
+        const raced = await uploader.inspect(attachment.pathname, attachment.size);
+        if (raced) {
+          assertMatchingBlobMetadata(attachment, raced);
+          continue;
+        }
+        throw error;
+      }
+    }
+  } catch (error) {
+    throw attachConfirmedUploads(error, newlyUploaded);
+  }
+  return newlyUploaded;
+}
+
+function assertMatchingBlobMetadata(
+  attachment: MigrationAttachment,
+  metadata: { size: number; contentType: string; sha256: string },
+): void {
+  if (metadata.size !== attachment.size || metadata.contentType !== attachment.contentType || metadata.sha256 !== attachment.sha256) {
+    throw new Error(`已存在的 Blob 与迁移附件不一致：${attachment.pathname}`);
+  }
+}
+
+async function hashPrivateBlobStream(
+  stream: ReadableStream<Uint8Array>,
+  declaredSize: number,
+  maximumBytes: number,
+): Promise<string> {
+  const reader = stream.getReader();
+  const hash = createHash("sha256");
+  let bytesRead = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesRead += value.byteLength;
+      if (bytesRead > maximumBytes || bytesRead > declaredSize) {
+        await reader.cancel("Blob exceeded declared migration attachment size");
+        throw new Error("已有 Blob 内容超过迁移附件大小上限");
+      }
+      hash.update(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (bytesRead !== declaredSize) throw new Error("已有 Blob 声明大小与实际内容不一致");
+  return hash.digest("hex");
+}
+
+function attachConfirmedUploads(error: unknown, newlyUploaded: string[]): Error & { newlyUploaded: string[] } {
+  const failure = error instanceof Error ? error : new Error("附件上传失败");
+  const previouslyAttached = Array.isArray((failure as Error & { newlyUploaded?: unknown }).newlyUploaded)
+    ? (failure as Error & { newlyUploaded: string[] }).newlyUploaded
+    : [];
+  const confirmed = [...new Set([...previouslyAttached, ...newlyUploaded])];
+  try {
+    return Object.assign(failure, { newlyUploaded: confirmed });
+  } catch {
+    return Object.assign(new Error(failure.message, { cause: failure }), { newlyUploaded: confirmed });
+  }
+}
+
+async function preserveCleanupIntent(
+  database: MigrationCloudDatabase,
+  uploader: MigrationUploader,
+  pathnames: string[],
+): Promise<void> {
+  const cleanupErrors: Error[] = [];
+  for (const pathname of pathnames) {
+    try {
+      await database.query(`
+        INSERT INTO workspace_blob_cleanup(pathname, reason, state, attempts, last_error, next_attempt_at)
+        VALUES ($1, $2, 'pending', 0, NULL, now())
+        ON CONFLICT(pathname) DO UPDATE SET
+          reason = EXCLUDED.reason,
+          state = 'pending',
+          attempts = 0,
+          last_error = NULL,
+          next_attempt_at = now()
+      `, [pathname, "migration-rollback"]);
+    } catch (outboxError) {
+      try {
+        await uploader.delete(pathname);
+      } catch (deleteError) {
+        cleanupErrors.push(new AggregateError([outboxError, deleteError], `迁移失败且附件清理需要人工处理：${pathname}`));
+      }
+    }
+  }
+  if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, "迁移失败且部分附件清理需要人工处理");
+}
+
+function parseArguments(argv: string[]): Record<string, string | boolean> {
+  const result: Record<string, string | boolean> = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--dry-run") result.dryRun = true;
+    else if (argument.startsWith("--")) {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) throw new Error(`参数 ${argument} 缺少值`);
+      result[argument.slice(2)] = value;
+      index += 1;
+    } else throw new Error(`未知参数 ${argument}`);
+  }
+  return result;
+}
+
+function printResult(result: ImportCloudDataResult): void {
+  for (const name of collectionNames) {
+    const count = result.counts[name];
+    console.log(`${name} active=${count.active} deleted=${count.deleted} total=${count.total}`);
+  }
+  console.log(`settings total=${result.settings}`);
+  console.log(`dailyReviews total=${result.dailyReviews}`);
+  console.log(`attachments total=${result.attachments}`);
+  if (result.dryRun) console.log("dry-run no-write");
+}
+
+export async function runImportCli(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const args = parseArguments(argv);
+  const inputPath = typeof args.input === "string" ? args.input : "";
+  if (!inputPath) throw new Error("必须指定迁移包路径");
+  const pkg = readMigrationPackage(inputPath);
+  if (args.dryRun === true) {
+    const result = await importCloudData({ pkg, database: noWriteDatabase, dryRun: true });
+    printResult(result);
+    return;
+  }
+  const config = readCloudConfig();
+  const database = new CloudDatabase(config.databaseUrl);
+  const result = await importCloudData({
+    pkg,
+    database,
+    attachmentsDirectory: typeof args.attachments === "string" ? args.attachments : undefined,
+  });
+  printResult(result);
+}
+
+const noWriteDatabase: MigrationCloudDatabase = {
+  query: async () => {
+    throw new Error("dry-run 禁止数据库写入");
+  },
+  transaction: async () => {
+    throw new Error("dry-run 禁止数据库事务");
+  },
+};
+
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  runImportCli().catch((error) => {
+    console.error(error instanceof Error ? error.message : "迁移导入失败");
+    process.exitCode = 1;
+  });
+}

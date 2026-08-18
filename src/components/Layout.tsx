@@ -28,6 +28,8 @@ const groups = [
     { to: "/fitness", label: "健身计划", module: "fitness", tone: "sage" },
     { to: "/diet", label: "饮食计划", module: "diet", tone: "apricot" },
     { to: "/entertainment", label: "游戏娱乐", module: "entertainment", tone: "indigo" },
+    { to: "/reading", label: "读书", module: "reading", tone: "amber" },
+    { to: "/reflection", label: "思考", module: "reflection", tone: "coral" },
   ] },
   { label: "系统", links: [{ to: "/settings", label: "数据与设置", module: "settings", tone: "graphite" }] },
 ] satisfies Array<{ label: string; links: Array<{ to: string; label: string; module: ModuleArtworkName; tone: string }> }>;
@@ -38,7 +40,9 @@ const collectionRoutes: Record<string, string> = {
   consultingInteractions: "/consulting", consultingDeliverables: "/consulting", consultingFollowups: "/consulting",
   consultingTimeEntries: "/consulting", workoutTemplates: "/fitness", workouts: "/fitness", bodyMetrics: "/fitness",
   nutritionTargets: "/diet", foods: "/diet", meals: "/diet", mealItems: "/diet", entertainmentItems: "/entertainment",
-  playSessions: "/entertainment", quickMemos: "/",
+  playSessions: "/entertainment", quickMemos: "/", importantDates: "/", longTermGoals: "/", focusTimers: "/",
+  books: "/reading", readingSessions: "/reading", readingNotes: "/reading",
+  dailyReflections: "/reflection", reflectionActions: "/reflection", thoughtNotes: "/reflection",
 };
 
 const routeMeta: Record<string, { label: string; module: ModuleArtworkName; tone: string; index: string }> = {
@@ -50,7 +54,9 @@ const routeMeta: Record<string, { label: string; module: ModuleArtworkName; tone
   "/fitness": { label: "健身计划", module: "fitness", tone: "sage", index: "05" },
   "/diet": { label: "饮食计划", module: "diet", tone: "apricot", index: "06" },
   "/entertainment": { label: "游戏娱乐", module: "entertainment", tone: "indigo", index: "07" },
-  "/settings": { label: "数据与设置", module: "settings", tone: "graphite", index: "08" },
+  "/reading": { label: "读书", module: "reading", tone: "amber", index: "08" },
+  "/reflection": { label: "思考", module: "reflection", tone: "coral", index: "09" },
+  "/settings": { label: "数据与设置", module: "settings", tone: "graphite", index: "10" },
 };
 
 export function AppLayout() {
@@ -61,7 +67,10 @@ export function AppLayout() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [exitState, setExitState] = useState<"idle" | "saving" | "done" | "error">("idle");
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemStatus, staleTime: 30_000 });
-  const currentPage = routeMeta[location.pathname] ?? routeMeta["/"];
+  const cloudMode = system.data?.mode === "cloud";
+  const backupStatus = system.data && "backupStatus" in system.data ? system.data.backupStatus : undefined;
+  const latestBackup = system.data && "latestBackup" in system.data ? system.data.latestBackup : undefined;
+  const currentPage = routeMeta[location.pathname] ?? (location.pathname.startsWith("/reading/") ? routeMeta["/reading"] : location.pathname.startsWith("/reflection/") ? routeMeta["/reflection"] : routeMeta["/"]);
   const appearance = normalizeAppearance(data.settings.appearance);
   const theme = data.settings.theme === "dark" ? "dark" : "light";
   const ambientScene = chooseAmbientScene(currentPage.module, theme);
@@ -126,7 +135,7 @@ export function AppLayout() {
       await saveNow();
       await api.saveAndExit();
       setExitState("done");
-      document.title = "木子工作台已安全退出";
+      document.title = "samuel的工作台已安全退出";
     } catch {
       setExitState("error");
     }
@@ -134,7 +143,7 @@ export function AppLayout() {
 
   return (
     <div
-      className={classNames("app-shell", appearance === "neo" && "neo-shell", collapsed && "sidebar-collapsed")}
+      className={classNames("app-shell", appearance === "ios" && "ios-shell", appearance === "neo" && "neo-shell", collapsed && "sidebar-collapsed")}
       data-appearance={appearance}
       data-module={currentPage.module}
       data-ambient={ambientScene}
@@ -142,7 +151,7 @@ export function AppLayout() {
       {appearance === "liquid" ? <AmbientEnvironment scene={ambientScene} /> : appearance === "notebook" ? <NotebookEnvironment /> : null}
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <aside className="sidebar glass-regular">
-        <div className="brand"><div className="brand-mark" aria-hidden="true"><img src={appearance === "neo" ? "/assets/neo/muzi-app-icon-brand.png" : "/assets/brand/muzi-mark.svg"} alt="" draggable={false} /></div><div className="brand-copy"><strong>木子工作台</strong><span>本地个人空间</span></div>{appearance === "neo" ? <span className="brand-edition">NEO / PERSONAL CONTROL DESK</span> : null}</div>
+        <div className="brand"><div className="brand-mark" aria-hidden="true"><img src="/assets/app/app-icon-brand-512-v2.png" alt="" draggable={false} /></div><div className="brand-copy"><strong>samuel的工作台</strong><span>本地个人空间</span></div>{appearance === "neo" ? <span className="brand-edition">NEO / PERSONAL CONTROL DESK</span> : null}</div>
         <Button className="quick-create" onClick={() => setQuickOpen(true)}><Plus size={18} />快速新增</Button>
         <nav aria-label="主导航">
           {groups.map((group) => (
@@ -157,7 +166,7 @@ export function AppLayout() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <div className={classNames("local-state", system.data?.backupStatus?.state === "error" && "backup-error")}><span className="status-dot" /><div><strong>{system.data?.backupStatus?.state === "error" ? "自动备份失败" : "仅保存在这台电脑"}</strong><small>{system.data?.backupStatus?.state === "error" ? system.data.backupStatus.lastError : system.data?.latestBackup ? `备份于 ${formatDateTime(system.data.latestBackup.createdAt)}` : "等待首次备份"}</small></div></div>
+          <div className={classNames("local-state", backupStatus?.state === "error" && "backup-error")}><span className="status-dot" /><div><strong>{cloudMode ? "受保护的云端副本" : backupStatus?.state === "error" ? "自动备份失败" : "仅保存在这台电脑"}</strong><small>{cloudMode ? "Neon 与 Vercel Blob" : backupStatus?.state === "error" ? backupStatus.lastError : latestBackup ? `备份于 ${formatDateTime(latestBackup.createdAt)}` : "等待首次备份"}</small></div></div>
         </div>
       </aside>
       <div className="app-main">
@@ -166,13 +175,13 @@ export function AppLayout() {
             <IconButton label={collapsed ? "展开导航" : "收起导航"} onClick={() => setCollapsed((value) => !value)}><SidebarSimple size={20} /></IconButton>
             <span className="toolbar-page-icon" data-tone={currentPage.tone} aria-hidden="true"><ModuleArtwork module={currentPage.module} /></span>
             <div className="toolbar-context"><strong>{currentPage.label}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date())}</span></div>
-            {appearance === "neo" ? <span className="topbar-index">{currentPage.index} / 08</span> : null}
+            {appearance === "neo" ? <span className="topbar-index">{currentPage.index} / 10</span> : null}
           </div>
           <div className="topbar-actions">
             <button className="search-trigger glass-clear" aria-label="搜索所有内容" title="搜索所有内容" onClick={() => setSearchOpen(true)}><MagnifyingGlass size={18} /><span>搜索所有内容</span><kbd><Command size={12} />K</kbd></button>
             <Button className="topbar-create" variant="secondary" size="sm" onClick={() => setQuickOpen(true)}><Plus size={16} />快速新建</Button>
             <Button className="manual-save" variant="secondary" size="sm" loading={saveStatus === "saving"} onClick={() => void saveNow().catch(() => undefined)}><FloppyDisk size={16} />手动保存</Button>
-            <Button className="save-exit" variant="ghost" size="sm" loading={exitState === "saving"} disabled={exitState === "done"} onClick={() => void saveAndExit()}><Power size={16} />{exitState === "error" ? "退出失败，重试" : "保存并退出"}</Button>
+            {!cloudMode ? <Button className="save-exit" variant="ghost" size="sm" loading={exitState === "saving"} disabled={exitState === "done"} onClick={() => void saveAndExit()}><Power size={16} />{exitState === "error" ? "退出失败，重试" : "保存并退出"}</Button> : null}
             <SaveIndicator status={saveStatus} />
           </div>
         </header>
@@ -194,7 +203,7 @@ function NotebookEnvironment() {
 }
 
 function ExitScreen() {
-  return <div className="exit-screen" role="status"><div className="exit-card"><CheckCircle size={32} weight="fill" /><strong>数据已保存，木子工作台已安全退出</strong><p>现在可以关闭这个页面。下次双击启动图标，会重新启动并打开工作台。</p></div></div>;
+  return <div className="exit-screen" role="status"><div className="exit-card"><CheckCircle size={32} weight="fill" /><strong>数据已保存，samuel的工作台已安全退出</strong><p>现在可以关闭这个页面。下次双击启动图标，会重新启动并打开工作台。</p></div></div>;
 }
 
 function SaveIndicator({ status }: { status: "idle" | "saving" | "saved" | "error" }) {
@@ -219,7 +228,7 @@ function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) 
       return result;
     }, {});
   }, [search.data]);
-  const moduleNames: Record<string, string> = { dashboard: "首页", today: "今日计划", media: "自媒体", development: "开发工作", consulting: "咨询工作", fitness: "健身计划", diet: "饮食计划", entertainment: "游戏娱乐" };
+  const moduleNames: Record<string, string> = { dashboard: "首页", today: "今日计划", media: "自媒体", development: "开发工作", consulting: "咨询工作", fitness: "健身计划", diet: "饮食计划", entertainment: "游戏娱乐", reading: "读书", reflection: "思考" };
   return (
     <Modal open={open} title="搜索工作台" description="按模块查找标题、笔记和记录内容" onClose={onClose} wide>
       <div className="command-search glass-clear"><MagnifyingGlass size={20} /><input autoFocus aria-label="搜索关键词" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入关键词" /></div>
@@ -243,6 +252,8 @@ function QuickCreateModal({ open, onClose }: { open: boolean; onClose: () => voi
     { label: "咨询跟进", detail: "安排客户后续联系", route: "/consulting?new=followup", tone: "amber", module: "consulting" },
     { label: "训练记录", detail: "开始或安排一次训练", route: "/fitness?new=workout", tone: "sage", module: "fitness" },
     { label: "餐食记录", detail: "记录计划或实际饮食", route: "/diet?new=meal", tone: "apricot", module: "diet" },
+    { label: "添加书籍", detail: "加入想读或正在读的书", route: "/reading?new=book", tone: "amber", module: "reading" },
+    { label: "记录思考", detail: "完成今日复盘或写下一个想法", route: "/reflection?new=thought", tone: "coral", module: "reflection" },
   ];
   return (
     <Modal open={open} title="快速新增" description="选择要记录的内容类型" onClose={onClose}>

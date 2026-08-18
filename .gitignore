@@ -46,6 +46,8 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/migration-output/
+muzi-cloud-migration-*.json
 
 # local application data
 /MuziWorkspace/

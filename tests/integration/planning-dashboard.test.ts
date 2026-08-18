@@ -37,6 +37,43 @@ describe("dashboard and daily planning", () => {
     expect(dashboard.json().data.overview).toMatchObject({ completed: 1, total: 2, progress: 50 });
   });
 
+  it("aggregates sorted important dates and long-term goals without a focus timer", async () => {
+    await create("importantDates", { name: "后显示", target_date: "2026-08-20", recurrence: "none", color: "orange", sort_order: 2 });
+    await create("importantDates", { name: "先显示", target_date: "2026-08-15", recurrence: "yearly", color: "blue", sort_order: 1 });
+    await create("longTermGoals", { name: "第二目标", progress: 20, status: "active", sort_order: 2 });
+    await create("longTermGoals", { name: "第一目标", progress: 60, status: "active", sort_order: 1 });
+
+    const response = await app.inject({ method: "GET", url: "/api/dashboard?date=2026-08-15" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ activeFocusTimer: null, sectionErrors: {} });
+    expect(response.json().data.importantDates.map((item: any) => item.name)).toEqual(["先显示", "后显示"]);
+    expect(response.json().data.importantDates[0]).toMatchObject({ displayDate: "2026-08-15", daysRemaining: 0, state: "today" });
+    expect(response.json().data.longTermGoals.map((item: any) => item.name)).toEqual(["第一目标", "第二目标"]);
+  });
+
+  it("exposes one recoverable focus timer through the dashboard", async () => {
+    const task = await create("planItems", { title: "专注测试", plan_date: "2026-08-15", estimated_minutes: 25 });
+    const started = await app.inject({ method: "POST", url: "/api/focus-timers", payload: { planItemId: task.id, plannedMinutes: 25 } });
+    expect(started.statusCode).toBe(201);
+    expect(started.json().data).toMatchObject({ plan_item_id: task.id, status: "running" });
+
+    const duplicate = await app.inject({ method: "POST", url: "/api/focus-timers", payload: { planItemId: null, plannedMinutes: 10 } });
+    expect(duplicate.statusCode).toBe(400);
+
+    let dashboard = await app.inject({ method: "GET", url: "/api/dashboard?date=2026-08-15" });
+    expect(dashboard.json().data.activeFocusTimer.id).toBe(started.json().data.id);
+
+    const paused = await app.inject({ method: "POST", url: `/api/focus-timers/${started.json().data.id}/pause` });
+    expect(paused.json().data.status).toBe("paused");
+    const resumed = await app.inject({ method: "POST", url: `/api/focus-timers/${started.json().data.id}/resume` });
+    expect(resumed.json().data.status).toBe("running");
+    const finished = await app.inject({ method: "POST", url: `/api/focus-timers/${started.json().data.id}/finish`, payload: { status: "completed" } });
+    expect(finished.json().data.status).toBe("completed");
+
+    dashboard = await app.inject({ method: "GET", url: "/api/dashboard?date=2026-08-15" });
+    expect(dashboard.json().data.activeFocusTimer).toBeNull();
+  });
+
   it("postpones items and saves the daily review", async () => {
     const item = await create("planItems", { title: "需要延期", plan_date: "2026-08-02" });
     const postponed = await app.inject({ method: "POST", url: `/api/plan-items/${item.id}/postpone`, payload: { date: "2026-08-03" } });

@@ -66,7 +66,7 @@ describe("SQLite persistence and migrations", () => {
     try {
       const tables = manager.db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all() as Array<{ name: string }>;
       const names = tables.map((row) => row.name);
-      expect(names).toEqual(expect.arrayContaining(["plan_items", "media_contents", "dev_projects", "consulting_projects", "workouts", "meals", "entertainment_items", "trash_entries"]));
+      expect(names).toEqual(expect.arrayContaining(["plan_items", "media_contents", "dev_projects", "consulting_projects", "workouts", "meals", "entertainment_items", "books", "reading_sessions", "reading_notes", "daily_reflections", "reflection_actions", "thought_notes", "trash_entries"]));
       const plan = manager.db.prepare("EXPLAIN QUERY PLAN SELECT * FROM plan_items WHERE plan_date = ? AND status = ? AND deleted_at IS NULL").all("2026-08-02", "todo") as Array<{ detail: string }>;
       expect(plan.some((row) => row.detail.includes("idx_plan_items_date_status"))).toBe(true);
     } finally {
@@ -100,13 +100,19 @@ describe("SQLite persistence and migrations", () => {
         "SELECT name, notes, body_part FROM workout_templates WHERE id = ?",
       ).get("existing-template") as { name: string; notes: string; body_part: string };
       const workoutColumns = upgradedManager.db.pragma("table_info(workouts)") as Array<{ name: string }>;
+      const planColumns = upgradedManager.db.pragma("table_info(plan_items)") as Array<{ name: string }>;
+      const workbenchTables = upgradedManager.db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('important_dates', 'long_term_goals', 'focus_timers') ORDER BY name",
+      ).all() as Array<{ name: string }>;
       const versions = upgradedManager.db.prepare(
         "SELECT version FROM schema_migrations ORDER BY version",
       ).all() as Array<{ version: string }>;
 
       expect(template).toEqual({ name: "原有训练模板", notes: "升级后不能丢失", body_part: "" });
       expect(workoutColumns.map((column) => column.name)).toContain("body_part");
-      expect(versions.at(-1)?.version).toBe("002_workout_body_part.sql");
+      expect(planColumns.map((column) => column.name)).toContain("sort_order");
+      expect(workbenchTables.map((table) => table.name)).toEqual(["focus_timers", "important_dates", "long_term_goals"]);
+      expect(versions.at(-1)?.version).toBe("005_progress_workbench.sql");
     } finally {
       upgradedManager.close();
     }

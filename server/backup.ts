@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import JSZip from "jszip";
+import { createHash } from "node:crypto";
 import type { DatabaseManager } from "./database.js";
 import type { AppStore } from "./store.js";
 import type { AppPaths } from "./config.js";
@@ -139,6 +140,18 @@ export class BackupManager {
     for (const name of Object.keys(collectionDefinitions) as CollectionName[]) {
       folder.file(`${name}.csv`, toCsv(this.store.list(name, true)));
     }
+    const attachments: Array<{ path: string; size: number; sha256: string }> = [];
+    if (fs.existsSync(this.paths.readingFilesDir)) {
+      for (const filename of fs.readdirSync(this.paths.readingFilesDir)) {
+        const source = path.join(this.paths.readingFilesDir, filename);
+        if (!fs.statSync(source).isFile() || filename.endsWith(".partial")) continue;
+        const content = fs.readFileSync(source);
+        const zipPath = `attachments/reading/${filename}`;
+        zip.file(zipPath, content);
+        attachments.push({ path: zipPath, size: content.byteLength, sha256: createHash("sha256").update(content).digest("hex") });
+      }
+    }
+    zip.file("attachments/manifest.json", JSON.stringify({ version: 1, files: attachments }, null, 2));
     const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
     const filename = `muzi-export-${safeTimestamp()}.zip`;
     const output = path.join(this.paths.exportsDir, filename);

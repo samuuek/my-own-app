@@ -1,0 +1,181 @@
+/* iPhone system appearance ------------------------------------------------ */
+
+:root[data-appearance="ios"] {
+  color-scheme: light;
+  --bg: #f2f2f7;
+  --bg-deep: #e5e5ea;
+  --text: #1c1c1e;
+  --text-soft: #636366;
+  --text-faint: #8e8e93;
+  --on-accent: #ffffff;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-strong: #ffffff;
+  --surface-muted: rgba(0, 122, 255, .08);
+  --surface-inset: rgba(118, 118, 128, .08);
+  --surface-sheet: #ffffff;
+  --border: rgba(60, 60, 67, .16);
+  --border-strong: rgba(60, 60, 67, .28);
+  --glass-edge: rgba(255, 255, 255, .9);
+  --glass-edge-low: rgba(255, 255, 255, .56);
+  --glass-rim: rgba(60, 60, 67, .12);
+  --accent: #007aff;
+  --accent-deep: #0066d6;
+  --accent-soft: rgba(0, 122, 255, .12);
+  --success: #34c759;
+  --success-soft: rgba(52, 199, 89, .13);
+  --warning: #ff9500;
+  --warning-soft: rgba(255, 149, 0, .14);
+  --danger: #ff3b30;
+  --danger-soft: rgba(255, 59, 48, .12);
+  --glass-clear-bg: rgba(255, 255, 255, .78);
+  --glass-regular-bg: rgba(255, 255, 255, .9);
+  --frosted-bg: rgba(255, 255, 255, .94);
+  --popover-bg: rgba(255, 255, 255, .97);
+  --glass-clear-filter: blur(24px) saturate(130%);
+  --glass-regular-filter: blur(30px) saturate(135%);
+  --frosted-filter: blur(18px) saturate(120%);
+  --glass-sheen: inset 0 1px 0 rgba(255, 255, 255, .9);
+  --frosted-sheen: inset 0 1px 0 rgba(255, 255, 255, .82);
+  --shadow-glass: 0 12px 36px rgba(0, 0, 0, .08);
+  --shadow-panel: 0 8px 30px rgba(0, 0, 0, .07);
+  --shadow-control: 0 3px 12px rgba(0, 0, 0, .08);
+  --radius-chip: 11px;
+  --radius-control: 13px;
+  --radius-inset: 17px;
+  --radius-panel: 22px;
+  --radius-glass: 26px;
+  --radius-modal: 28px;
+}
+
+:root[data-appearance="ios"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --bg-deep: #000000;
+  --text: #ffffff;
+  --text-soft: #aeaeb2;
+  --text-faint: #8e8e93;
+  --on-accent: #ffffff;
+  --surface: #1c1c1e;
+  --surface-raised: #2c2c2e;
+  --surface-strong: #2c2c2e;
+  --surface-muted: rgba(10, 132, 255, .16);
+  --surface-inset: #111113;
+  --surface-sheet: #1c1c1e;
+  --border: rgba(84, 84, 88, .65);
+  --border-strong: rgba(99, 99, 102, .78);
+  --accent: #0a84ff;
+  --accent-deep: #409cff;
+  --accent-soft: rgba(10, 132, 255, .2);
+  --success: #30d158;
+  --success-soft: rgba(48, 209, 88, .18);
+  --warning: #ff9f0a;
+  --warning-soft: rgba(255, 159, 10, .18);
+  --danger: #ff453a;
+  --danger-soft: rgba(255, 69, 58, .18);
+  --glass-clear-bg: rgba(28, 28, 30, .78);
+  --glass-regular-bg: rgba(28, 28, 30, .92);
+  --frosted-bg: rgba(44, 44, 46, .94);
+  --popover-bg: rgba(44, 44, 46, .98);
+  --glass-edge: rgba(255, 255, 255, .1);
+  --glass-edge-low: rgba(255, 255, 255, .06);
+  --glass-rim: rgba(255, 255, 255, .08);
+  --shadow-glass: 0 16px 40px rgba(0, 0, 0, .42);
+  --shadow-panel: 0 10px 32px rgba(0, 0, 0, .34);
+}
+
+:root[data-appearance="ios"] .ios-shell .section,
+:root[data-appearance="ios"] .ios-shell .detail-hero {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+}
+
+:root[data-appearance="ios"] .ios-shell .workbench-overview,
+:root[data-appearance="ios"] .ios-shell .workbench-panel {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-appearance="ios"] .ios-shell .progress-ring-track { stroke: #e5e5ea; }
+:root[data-appearance="ios"] .ios-shell .important-date-card,
+:root[data-appearance="ios"] .ios-shell .long-term-goal-card {
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgba(60, 60, 67, .05);
+}
+
+:root[data-appearance="ios"] .ios-shell .focus-timer-content,
+:root[data-appearance="ios"] .ios-shell .workbench-empty { background: var(--surface-inset); }
+
+:root[data-appearance="ios"] .ios-shell .workbench-item-actions button,
+:root[data-appearance="ios"] .ios-shell .plan-row-actions button { color: var(--accent); }
+
+:root[data-appearance="ios"] .ios-shell .form-submit-error { border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent); }
+
+:root[data-appearance="ios"] .ios-shell .button,
+:root[data-appearance="ios"] .ios-shell button,
+:root[data-appearance="ios"] .ios-shell input,
+:root[data-appearance="ios"] .ios-shell textarea,
+:root[data-appearance="ios"] .ios-shell select {
+  font-family: var(--font-ui);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-appearance="ios"] *,
+  :root[data-appearance="ios"] *::before,
+  :root[data-appearance="ios"] *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
+
+@media (max-width: 900px) {
+  :root[data-appearance="ios"] .ios-shell,
+  :root[data-appearance="ios"] .ios-shell.sidebar-collapsed { grid-template-columns: 1fr; }
+  :root[data-appearance="ios"] .ios-shell .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-toolbar);
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 8px 10px;
+    border-width: 0 0 1px;
+    border-radius: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 7px;
+    overflow: visible;
+  }
+  :root[data-appearance="ios"] .ios-shell .brand { flex: 0 0 38px; min-height: 38px; padding: 0; }
+  :root[data-appearance="ios"] .ios-shell .brand-mark { width: 38px; height: 38px; flex-basis: 38px; border-radius: 11px; }
+  :root[data-appearance="ios"] .ios-shell :is(.brand-copy, .nav-label, .nav-link span, .sidebar-foot) { display: none; }
+  :root[data-appearance="ios"] .ios-shell .quick-create { flex: 0 0 38px; width: 38px; height: 38px; margin: 0; padding: 0; font-size: 0; }
+  :root[data-appearance="ios"] .ios-shell .sidebar nav { display: flex; flex: 1 1 0; min-width: 0; gap: 3px; margin: 0; padding: 0 2px; overflow-x: auto; overflow-y: hidden; }
+  :root[data-appearance="ios"] .ios-shell .nav-group { display: contents; }
+  :root[data-appearance="ios"] .ios-shell .nav-link { flex: 0 0 36px; width: 36px; min-height: 36px; justify-content: center; padding: 0; }
+  :root[data-appearance="ios"] .ios-shell .nav-link > .module-artwork { width: 28px; height: 28px; flex-basis: 28px; }
+  :root[data-appearance="ios"] .ios-shell .topbar { position: relative; top: auto; margin: 8px 10px 0; }
+  :root[data-appearance="ios"] .ios-shell .page-container { padding-inline: 20px; }
+  :root[data-appearance="ios"] .ios-shell .dashboard-grid { grid-template-columns: 1fr; }
+  :root[data-appearance="ios"] .ios-shell .dashboard-aside { position: static; }
+}
+
+@media (max-width: 760px) {
+  :root[data-appearance="ios"] .ios-shell .topbar { min-height: 52px; padding: 7px 9px; }
+  :root[data-appearance="ios"] .ios-shell :is(.toolbar-page-icon, .toolbar-context span, .topbar-create, .manual-save, .save-indicator) { display: none; }
+  :root[data-appearance="ios"] .ios-shell .page-container { width: 100%; padding: 20px 14px 52px; }
+  :root[data-appearance="ios"] .ios-shell .page-header { grid-template-columns: 44px minmax(0, 1fr); min-height: 66px; row-gap: 12px; }
+  :root[data-appearance="ios"] .ios-shell .page-header-icon { width: 42px; height: 42px; }
+  :root[data-appearance="ios"] .ios-shell .page-header h1 { font-size: 24px; }
+  :root[data-appearance="ios"] .ios-shell .page-actions { grid-column: 1 / -1; grid-row: 2; justify-content: stretch; }
+  :root[data-appearance="ios"] .ios-shell .page-actions .button { width: 100%; justify-content: center; }
+  :root[data-appearance="ios"] .ios-shell .dashboard-command-strip { overflow-x: auto; }
+  :root[data-appearance="ios"] .ios-shell .dashboard-command-strip button { flex: 0 0 auto; }
+}

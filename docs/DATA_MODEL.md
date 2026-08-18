@@ -13,6 +13,8 @@
 | 健身 | `workout_templates`、`workout_template_exercises`、`workouts`、`workout_exercises`、`workout_sets`、`body_metrics` | 训练部位、模板与实际训练快照、逐组数据和身体指标 |
 | 饮食 | `nutrition_targets`、`foods`、`meals`、`meal_items` | 生效日营养目标、常用食物、计划/实际餐食和营养明细 |
 | 娱乐 | `entertainment_items`、`play_sessions` | 娱乐清单、状态、进度、目标和游玩时长 |
+| 读书 | `books`、`reading_sessions`、`reading_notes` | 书籍资料、阅读进度历史以及带章节和页码的多次笔记 |
+| 思考 | `daily_reflections`、`reflection_actions`、`thought_notes` | 每日唯一主复盘、可转计划的明日行动和不限数量的自由思考 |
 | 系统 | `settings`、`trash_entries`、`schema_migrations` | 使用偏好、回收站索引和数据库版本 |
 
 ## 首页、计划和来源记录

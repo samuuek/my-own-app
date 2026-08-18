@@ -9,6 +9,7 @@ export type AppPaths = {
   exportsDir: string;
   logsDir: string;
   backupIndex: string;
+  readingFilesDir: string;
 };
 
 export function getAppPaths(override?: string): AppPaths {
@@ -24,12 +25,14 @@ export function getAppPaths(override?: string): AppPaths {
     exportsDir: path.join(root, "exports"),
     logsDir: path.join(root, "logs"),
     backupIndex: path.join(root, "backups", "index.json"),
+    readingFilesDir: path.join(root, "attachments", "reading"),
   };
   for (const directory of [
     path.dirname(paths.dataFile),
     paths.backupsDir,
     paths.exportsDir,
     paths.logsDir,
+    paths.readingFilesDir,
   ]) {
     mkdirSync(directory, { recursive: true });
   }

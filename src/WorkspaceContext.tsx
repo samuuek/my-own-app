@@ -18,10 +18,11 @@ type WorkspaceContextValue = {
 };
 
 const emptyState: WorkspaceState = {
-  planItems: [], quickMemos: [], mediaContents: [], devProjects: [], devMilestones: [], devWorkItems: [], devLogs: [],
+  planItems: [], importantDates: [], longTermGoals: [], focusTimers: [], quickMemos: [], mediaContents: [], devProjects: [], devMilestones: [], devWorkItems: [], devLogs: [],
   clients: [], consultingProjects: [], consultingInteractions: [], consultingDeliverables: [], consultingFollowups: [], consultingTimeEntries: [],
   workoutTemplates: [], workoutTemplateExercises: [], workouts: [], workoutExercises: [], workoutSets: [], bodyMetrics: [], nutritionTargets: [],
-  foods: [], meals: [], mealItems: [], entertainmentItems: [], playSessions: [], settings: {}, trash: [],
+  foods: [], meals: [], mealItems: [], entertainmentItems: [], playSessions: [], books: [], readingSessions: [], readingNotes: [],
+  dailyReflections: [], reflectionActions: [], thoughtNotes: [], settings: {}, trash: [],
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -91,7 +92,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
   }), [query.data, query.isLoading, query.error, queryClient, registerSaveHandler, run, saveNow, saveStatus]);
 
-  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+  return (
+    <WorkspaceContext.Provider value={value}>
+      {query.data && query.error ? (
+        <div className="workspace-refetch-error" role="alert">
+          <span>数据刷新失败，已保留上次内容。</span>
+          <button type="button" onClick={() => void query.refetch()}>重试</button>
+        </div>
+      ) : null}
+      {children}
+    </WorkspaceContext.Provider>
+  );
 }
 
 export function useWorkspace(): WorkspaceContextValue {

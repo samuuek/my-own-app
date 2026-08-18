@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { WorkspaceProvider } from "./WorkspaceContext";
 import "./styles.css";
+import "./themes/ios.css";
 import "./themes/notebook.css";
 import "./neo.css";
 

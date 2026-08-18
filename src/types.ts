@@ -2,6 +2,9 @@ export type Entity = Record<string, any> & { id: string };
 
 export type WorkspaceState = {
   planItems: Entity[];
+  importantDates: Entity[];
+  longTermGoals: Entity[];
+  focusTimers: Entity[];
   quickMemos: Entity[];
   mediaContents: Entity[];
   devProjects: Entity[];
@@ -26,6 +29,12 @@ export type WorkspaceState = {
   mealItems: Entity[];
   entertainmentItems: Entity[];
   playSessions: Entity[];
+  books: Entity[];
+  readingSessions: Entity[];
+  readingNotes: Entity[];
+  dailyReflections: Entity[];
+  reflectionActions: Entity[];
+  thoughtNotes: Entity[];
   settings: Record<string, any>;
   trash: Entity[];
 };
@@ -37,8 +46,19 @@ export type DashboardData = {
   overview: { completed: number; total: number; progress: number; scheduledMinutes: number };
   timeline: Entity[];
   unscheduled: Entity[];
+  importantDates: Entity[];
+  longTermGoals: Entity[];
+  activeFocusTimer: FocusTimerSnapshot | null;
+  sectionErrors: Partial<Record<"importantDates" | "longTermGoals" | "focusTimer", string>>;
   attention: Entity[];
   summaries: Record<string, Entity[]>;
+};
+
+export type FocusTimerSnapshot = Entity & {
+  status: "running" | "paused" | "completed" | "cancelled";
+  remainingSeconds: number;
+  actualSeconds: number | null;
+  snapshotAt: string;
 };
 
 export type BackupRecord = {

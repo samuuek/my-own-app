@@ -5,23 +5,24 @@ import {
   type CollectionName,
   sourceCollectionByType,
 } from "./collections.js";
+import { calculateReadingStats, validateBookProgress } from "./reading.js";
+import { nextLocalDate, validateSourceCategory } from "./reflection.js";
+import { NotFoundError, ValidationError } from "./errors.js";
+import { validateWorkbenchEntity } from "./workbench.js";
 
 export type Entity = Record<string, any>;
-
-export class ValidationError extends Error {
-  statusCode = 400;
-}
-
-export class NotFoundError extends Error {
-  statusCode = 404;
-}
 
 export class AppStore {
   constructor(public readonly manager: DatabaseManager) {}
 
   list(name: CollectionName, includeDeleted = false): Entity[] {
     const definition = collectionDefinitions[name];
-    const where = includeDeleted ? "" : " WHERE deleted_at IS NULL";
+    const parentVisibility = !includeDeleted && (name === "readingSessions" || name === "readingNotes")
+      ? " AND book_id IN (SELECT id FROM books WHERE deleted_at IS NULL)"
+      : !includeDeleted && name === "reflectionActions"
+        ? " AND reflection_id IN (SELECT id FROM daily_reflections WHERE deleted_at IS NULL)"
+        : "";
+    const where = includeDeleted ? "" : ` WHERE deleted_at IS NULL${parentVisibility}`;
     return this.manager.db.prepare(`SELECT * FROM ${definition.table}${where} ORDER BY created_at DESC`).all() as Entity[];
   }
 
@@ -38,6 +39,15 @@ export class AppStore {
     const definition = collectionDefinitions[name];
     const clean = this.sanitize(name, input);
     this.requireFields(definition.required, clean);
+    validateWorkbenchEntity(name, null, clean);
+    if (name === "planItems" && clean.sort_order === undefined) {
+      const row = this.manager.db
+        .prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM plan_items WHERE plan_date = ? AND deleted_at IS NULL")
+        .get(clean.plan_date) as { next: number };
+      clean.sort_order = row.next;
+    }
+    if (name === "books") validateBookProgress(Number(clean.current_page ?? 0), clean.total_pages == null ? null : Number(clean.total_pages));
+    if (name === "dailyReflections" || name === "thoughtNotes") validateSourceCategory(clean.source_category);
     const now = new Date().toISOString();
     const row: Entity = { id: randomUUID(), ...clean, created_at: now, updated_at: now };
     const columns = Object.keys(row);
@@ -50,8 +60,15 @@ export class AppStore {
 
   update(name: CollectionName, id: string, input: Entity): Entity {
     const definition = collectionDefinitions[name];
-    this.get(name, id, true);
+    const existing = this.get(name, id, true);
     const clean = this.sanitize(name, input);
+    validateWorkbenchEntity(name, existing, clean);
+    if (name === "books") {
+      const currentPage = Number(clean.current_page ?? existing.current_page ?? 0);
+      const totalPagesValue = clean.total_pages !== undefined ? clean.total_pages : existing.total_pages;
+      validateBookProgress(currentPage, totalPagesValue == null ? null : Number(totalPagesValue));
+    }
+    if ((name === "dailyReflections" || name === "thoughtNotes") && clean.source_category !== undefined) validateSourceCategory(clean.source_category);
     if (Object.keys(clean).length === 0) throw new ValidationError("没有可更新的内容");
     clean.updated_at = new Date().toISOString();
     const columns = Object.keys(clean);
@@ -131,6 +148,68 @@ export class AppStore {
       ON CONFLICT(review_date) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at`)
       .run(date, content, now, now);
     return this.getDailyReview(date)!;
+  }
+
+  recordReadingProgress(bookId: string, input: Entity): Entity {
+    const book = this.get("books", bookId);
+    const startPage = Number(input.start_page);
+    const endPage = Number(input.end_page);
+    validateBookProgress(endPage, book.total_pages == null ? null : Number(book.total_pages));
+    if (!Number.isInteger(startPage) || startPage < 0 || startPage > endPage) throw new ValidationError("阅读起始页无效");
+    const result = this.manager.db.transaction(() => {
+      const session = this.create("readingSessions", { ...input, book_id: bookId, start_page: startPage, end_page: endPage });
+      const updated = this.update("books", bookId, { current_page: endPage, last_read_at: new Date().toISOString() });
+      const sessions = this.list("readingSessions").filter((item) => item.book_id === bookId);
+      const notes = this.list("readingNotes").filter((item) => item.book_id === bookId);
+      return { book: updated, session, stats: calculateReadingStats(updated, sessions, notes), suggestCompletion: Number(updated.total_pages) === endPage };
+    })();
+    return result;
+  }
+
+  saveDailyReflection(input: Entity): Entity {
+    const date = String(input.reflection_date ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ValidationError("复盘日期无效");
+    validateSourceCategory(input.source_category);
+    const actions = Array.isArray(input.actions) ? input.actions : [];
+    return this.manager.db.transaction(() => {
+      const existing = this.manager.db.prepare("SELECT id FROM daily_reflections WHERE reflection_date = ? AND deleted_at IS NULL").get(date) as { id: string } | undefined;
+      const fields = { ...input };
+      delete fields.actions;
+      const reflection = existing ? this.update("dailyReflections", existing.id, fields) : this.create("dailyReflections", fields);
+      const retained = new Set<string>();
+      actions.forEach((action: Entity, index: number) => {
+        const content = String(action.content ?? "").trim();
+        if (!content) throw new ValidationError("明日行动不能为空");
+        if (action.id) {
+          const current = this.get("reflectionActions", String(action.id), true);
+          if (current.reflection_id !== reflection.id) throw new ValidationError("行动不属于当前复盘");
+          this.update("reflectionActions", current.id, { content, sort_order: index });
+          retained.add(current.id);
+        } else {
+          retained.add(this.create("reflectionActions", { reflection_id: reflection.id, content, sort_order: index }).id);
+        }
+      });
+      for (const current of this.list("reflectionActions").filter((item) => item.reflection_id === reflection.id)) {
+        if (!retained.has(current.id)) this.softDelete("reflectionActions", current.id);
+      }
+      return { reflection, actions: this.list("reflectionActions").filter((item) => item.reflection_id === reflection.id) };
+    })();
+  }
+
+  addReflectionActionToPlan(actionId: string): Entity {
+    return this.manager.db.transaction(() => {
+      const action = this.get("reflectionActions", actionId);
+      const reflection = this.get("dailyReflections", action.reflection_id);
+      if (action.plan_item_id) {
+        try { return this.get("planItems", action.plan_item_id); } catch { /* recreate deleted plan */ }
+      }
+      const plan = this.create("planItems", {
+        title: action.content, plan_date: nextLocalDate(reflection.reflection_date), priority: "medium", status: "todo",
+        source_module: "reflection", source_entity_type: "reflection_action", source_entity_id: action.id,
+      });
+      this.update("reflectionActions", action.id, { plan_item_id: plan.id });
+      return plan;
+    })();
   }
 
   state(): Record<string, any> {

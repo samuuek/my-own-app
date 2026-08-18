@@ -52,7 +52,7 @@ test("production server serves the built app and API on loopback", async (contex
   assert.equal(missingAsset.status, 404);
   assert.doesNotMatch(await missingAsset.text(), /<html/i);
   const clientRoute = await fetch(`${baseUrl}/today`).then((response) => response.text());
-  assert.match(clientRoute, /<title>木子工作台<\/title>/);
+  assert.match(clientRoute, /<title>samuel的工作台<\/title>/);
 });
 
 test("desktop launcher reuses one server and the page exit endpoint saves before stopping it", async () => {

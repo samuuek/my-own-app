@@ -307,6 +307,8 @@
 .neo-shell .neo-nav-emblem[data-module="fitness"] { --nav-emblem-x: 100%; --nav-emblem-y: 50%; }
 .neo-shell .neo-nav-emblem[data-module="diet"] { --nav-emblem-x: 0%; --nav-emblem-y: 100%; }
 .neo-shell .neo-nav-emblem[data-module="entertainment"] { --nav-emblem-x: 50%; --nav-emblem-y: 100%; }
+.neo-shell .neo-nav-emblem[data-module="reading"] { --nav-emblem-x: 100%; --nav-emblem-y: 100%; }
+.neo-shell .neo-nav-emblem[data-module="reflection"] { --nav-emblem-x: 66.66%; --nav-emblem-y: 100%; }
 .neo-shell .neo-nav-emblem[data-module="settings"] { --nav-emblem-x: 100%; --nav-emblem-y: 100%; }
 .neo-shell .nav-link[href="/"] { --link-accent: var(--neo-coral); }
 .neo-shell .nav-link[href="/today"] { --link-accent: var(--neo-sun); }
@@ -316,6 +318,8 @@
 .neo-shell .nav-link[href="/fitness"] { --link-accent: var(--neo-leaf); }
 .neo-shell .nav-link[href="/diet"] { --link-accent: var(--neo-orange); }
 .neo-shell .nav-link[href="/entertainment"] { --link-accent: var(--neo-blue); }
+.neo-shell .nav-link[href="/reading"] { --link-accent: var(--neo-ochre); }
+.neo-shell .nav-link[href="/reflection"] { --link-accent: var(--neo-coral); }
 .neo-shell .nav-link[href="/settings"] { --link-accent: var(--neo-stone); }
 .neo-shell .nav-link:hover {
   border-color: var(--neo-ink);
@@ -762,6 +766,19 @@
 .neo-shell .dashboard-command-strip button:hover svg { color: var(--neo-accent); }
 
 .neo-shell .dashboard-grid { grid-template-columns: minmax(0, 1.8fr) minmax(300px, .72fr); gap: 30px; }
+.neo-shell :is(.workbench-overview, .workbench-panel) {
+  border: var(--neo-line-heavy);
+  border-radius: 1px;
+  background: var(--neo-sheet);
+  box-shadow: 7px 7px 0 var(--neo-shadow);
+  backdrop-filter: none;
+}
+.neo-shell .workbench-pair { gap: 26px; margin-bottom: 30px; }
+.neo-shell :is(.important-date-card, .long-term-goal-card, .focus-timer-content, .workbench-empty) { border: var(--neo-line); border-radius: 0; background: var(--neo-paper); box-shadow: none; }
+.neo-shell :is(.workbench-item-actions button, .plan-row-actions button) { border-radius: 0; }
+.neo-shell .progress-ring circle { stroke-width: 8; }
+.neo-shell .progress-ring-track { stroke: var(--neo-paper-deep); }
+.neo-shell .progress-ring-value { stroke: var(--neo-accent); }
 .neo-shell .dashboard-primary > .section { margin-bottom: 24px; }
 .neo-shell .dashboard-aside {
   top: 104px;
@@ -1095,6 +1112,7 @@
   .neo-shell .nav-link { flex: 0 0 auto; min-height: 36px; margin: 0; }
   .neo-shell .topbar { position: sticky; top: 0; }
   .neo-shell .dashboard-grid,
+  .neo-shell .workbench-pair,
   .neo-shell .fitness-grid,
   .neo-shell .settings-grid,
   .neo-shell .consult-layout,
